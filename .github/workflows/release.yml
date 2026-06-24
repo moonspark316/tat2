@@ -12,6 +12,10 @@ on:
 jobs:
   release:
     name: Build & upload (${{ matrix.label }})
+    # tauri-action needs write access to create/attach release assets; the
+    # default GITHUB_TOKEN is read-only on this repo.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
