@@ -27,6 +27,16 @@ export interface Workspace {
   contents: Record<string, string>;
 }
 
+export interface TrashEntry {
+  meta: PadMeta;
+  deletedAt: number;
+}
+
+export interface RestoredPad {
+  meta: PadMeta;
+  content: string;
+}
+
 export type ColorName =
   | "amber"
   | "orange"

@@ -14,6 +14,9 @@ interface SettingsProps {
   onTheme: (t: ThemeMode) => void;
   onExport: () => void;
   onImport: () => void;
+  autostartOn: boolean;
+  onToggleAutostart: () => void;
+  onTrash: () => void;
   onDelete: () => void;
   onClose: () => void;
 }
@@ -29,6 +32,9 @@ export function SettingsPanel({
   onTheme,
   onExport,
   onImport,
+  autostartOn,
+  onToggleAutostart,
+  onTrash,
   onDelete,
   onClose,
 }: SettingsProps) {
@@ -83,11 +89,26 @@ export function SettingsPanel({
       </div>
 
       <div className="row">
+        <span>Launch at login</span>
+        <button
+          className={`toggle ${autostartOn ? "on" : ""}`}
+          onClick={onToggleAutostart}
+        >
+          {autostartOn ? "On" : "Off"}
+        </button>
+      </div>
+
+      <div className="row">
         <span>File</span>
         <div className="stepper">
           <button onClick={onExport}>Export…</button>
           <button onClick={onImport}>Import…</button>
         </div>
+      </div>
+
+      <div className="row">
+        <span>Trash</span>
+        <button onClick={onTrash}>Open Trash…</button>
       </div>
 
       <div className="row actions">

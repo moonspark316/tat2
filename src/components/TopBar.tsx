@@ -14,6 +14,8 @@ interface TopBarProps {
   onReorder: (orderedIds: string[]) => void;
   onTogglePin: () => void;
   onHistory: () => void;
+  preview: boolean;
+  onTogglePreview: () => void;
   onToggleSettings: () => void;
   onClose: () => void;
 }
@@ -29,6 +31,8 @@ export function TopBar({
   onReorder,
   onTogglePin,
   onHistory,
+  preview,
+  onTogglePreview,
   onToggleSettings,
   onClose,
 }: TopBarProps) {
@@ -99,6 +103,13 @@ export function TopBar({
         </button>
       </div>
 
+      <button
+        className={`icon-btn md ${preview ? "on" : ""}`}
+        onClick={onTogglePreview}
+        title={preview ? "Edit text" : "Preview Markdown"}
+      >
+        {preview ? "✎" : "👁"}
+      </button>
       <button className="icon-btn history" onClick={onHistory} title="History">
         🕘
       </button>

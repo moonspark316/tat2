@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import {
+  disable as disableAutostart,
+  enable as enableAutostart,
+  isEnabled as isAutostartEnabled,
+} from "@tauri-apps/plugin-autostart";
 import { swatch, themeVars } from "./palette";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { TopBar } from "./components/TopBar";
@@ -10,6 +15,8 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { FindBar } from "./components/FindBar";
 import { SearchOverlay } from "./components/SearchOverlay";
 import { RevisionBrowser } from "./components/RevisionBrowser";
+import { TrashView } from "./components/TrashView";
+import { MarkdownView } from "./components/MarkdownView";
 import {
   exportPad,
   hidePopover,
@@ -31,7 +38,10 @@ export default function App() {
   const [showFind, setShowFind] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
+  const [preview, setPreview] = useState(false);
   const [pinned, setPinnedState] = useState(false);
+  const [autostartOn, setAutostartOn] = useState(false);
   const [systemDark, setSystemDark] = useState(prefersDark);
   const [findFocus, setFindFocus] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -72,6 +82,13 @@ export default function App() {
       void unlisten.then((un) => un());
     };
   }, [ws.flush]);
+
+  // ---- Reflect the current autostart (launch-at-login) state ----
+  useEffect(() => {
+    isAutostartEnabled()
+      .then(setAutostartOn)
+      .catch(() => setAutostartOn(false));
+  }, []);
 
   // ---- Track the system color scheme for theme="system" ----
   useEffect(() => {
@@ -225,6 +242,21 @@ export default function App() {
     }
   };
 
+  const toggleAutostart = async () => {
+    try {
+      if (autostartOn) {
+        await disableAutostart();
+        setAutostartOn(false);
+      } else {
+        await enableAutostart();
+        setAutostartOn(true);
+      }
+    } catch {
+      // Reflect actual state if the OS rejected the change.
+      isAutostartEnabled().then(setAutostartOn).catch(() => {});
+    }
+  };
+
   const onJump = (padId: string, offset: number, length: number) => {
     setShowSearch(false);
     if (padId === ws.activeId) {
@@ -254,6 +286,8 @@ export default function App() {
         onReorder={ws.reorderPads}
         onTogglePin={togglePin}
         onHistory={() => setShowHistory(true)}
+        preview={preview}
+        onTogglePreview={() => setPreview((v) => !v)}
         onToggleSettings={() => setShowSettings((v) => !v)}
         onClose={closeWindow}
       />
@@ -270,6 +304,12 @@ export default function App() {
           onTheme={ws.setTheme}
           onExport={handleExport}
           onImport={handleImport}
+          autostartOn={autostartOn}
+          onToggleAutostart={toggleAutostart}
+          onTrash={() => {
+            setShowSettings(false);
+            setShowTrash(true);
+          }}
           onDelete={() => {
             ws.removePad(ws.activePad!.id);
             setShowSettings(false);
@@ -290,12 +330,16 @@ export default function App() {
         />
       ) : null}
 
-      <Editor
-        ref={textareaRef}
-        value={ws.activeContent}
-        fontSize={fontSize}
-        onChange={ws.edit}
-      />
+      {preview ? (
+        <MarkdownView content={ws.activeContent} fontSize={fontSize} />
+      ) : (
+        <Editor
+          ref={textareaRef}
+          value={ws.activeContent}
+          fontSize={fontSize}
+          onChange={ws.edit}
+        />
+      )}
 
       <StatusBar content={ws.activeContent} />
 
@@ -314,6 +358,16 @@ export default function App() {
           currentContent={ws.activeContent}
           onRestore={ws.restoreContent}
           onClose={() => setShowHistory(false)}
+        />
+      ) : null}
+
+      {showTrash ? (
+        <TrashView
+          onRestore={async (id) => {
+            await ws.restoreFromTrash(id);
+            setShowTrash(false);
+          }}
+          onClose={() => setShowTrash(false)}
         />
       ) : null}
     </div>

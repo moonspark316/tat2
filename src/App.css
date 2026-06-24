@@ -241,8 +241,9 @@ body,
   gap: 8px;
 }
 .stepper button,
+.settings .row > button,
 .settings .actions button {
-  border: 0.5px solid rgba(0, 0, 0, 0.18);
+  border: 0.5px solid rgba(128, 128, 128, 0.35);
   background: var(--bg);
   color: var(--ink);
   border-radius: 7px;
@@ -251,8 +252,18 @@ body,
   font-size: 12px;
 }
 .stepper button:hover,
+.settings .row > button:hover,
 .settings .actions button:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(128, 128, 128, 0.15);
+}
+.settings .toggle.on {
+  background: var(--dot);
+  border-color: var(--dot);
+  color: #fff;
+}
+.icon-btn.md.on {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.18);
 }
 .settings .actions {
   justify-content: space-between;
@@ -518,4 +529,88 @@ body,
   font-size: 11px;
   opacity: 0.5;
   border-top: 0.5px solid rgba(128, 128, 128, 0.2);
+}
+
+/* ---- Markdown preview ---- */
+.markdown {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px;
+  line-height: 1.6;
+  color: var(--ink);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 0.6em 0 0.3em;
+  line-height: 1.25;
+}
+.markdown p {
+  margin: 0.4em 0;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 1.4em;
+  margin: 0.4em 0;
+}
+.markdown code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: rgba(128, 128, 128, 0.18);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.markdown pre {
+  background: rgba(128, 128, 128, 0.15);
+  padding: 10px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.markdown pre code {
+  background: none;
+  padding: 0;
+}
+.markdown blockquote {
+  margin: 0.4em 0;
+  padding-left: 0.8em;
+  border-left: 3px solid rgba(128, 128, 128, 0.4);
+  opacity: 0.85;
+}
+.markdown a {
+  color: var(--dot);
+}
+
+/* ---- Trash ---- */
+.trash-head {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.6;
+  border-bottom: 0.5px solid rgba(128, 128, 128, 0.2);
+}
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-bottom: 0.5px solid rgba(128, 128, 128, 0.1);
+}
+.trash-row .hit-snippet {
+  flex: 1;
+}
+.trash-row button {
+  border: 0.5px solid rgba(128, 128, 128, 0.35);
+  background: var(--bg);
+  color: var(--ink);
+  border-radius: 7px;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.trash-row button.danger {
+  color: #c0392b;
+  border-color: rgba(192, 57, 43, 0.4);
 }

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Index, Workspace } from "./types";
+import type { Index, PadMeta, TrashEntry, RestoredPad, Workspace } from "./types";
 
 // ---- Thin wrappers over the Rust storage commands ----
 
@@ -12,8 +12,16 @@ export const saveIndex = (index: Index): Promise<void> =>
 export const savePadNow = (id: string, content: string): Promise<void> =>
   invoke("save_pad", { id, content });
 
-export const deletePad = (id: string): Promise<void> =>
-  invoke("delete_pad", { id });
+export const trashPad = (meta: PadMeta): Promise<void> =>
+  invoke("trash_pad", { meta });
+
+export const listTrash = (): Promise<TrashEntry[]> => invoke("list_trash");
+
+export const restorePad = (id: string): Promise<RestoredPad> =>
+  invoke("restore_pad", { id });
+
+export const deleteTrash = (id: string): Promise<void> =>
+  invoke("delete_trash", { id });
 
 export const listRevisions = (id: string): Promise<number[]> =>
   invoke("list_revisions", { id });

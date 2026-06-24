@@ -3,12 +3,18 @@ import type { ColorName, Index, PadMeta, ThemeMode } from "../types";
 import { nextColor } from "../palette";
 import {
   AutoSaver,
-  deletePad as deletePadOnDisk,
   forceSnapshot,
   loadWorkspace,
+  restorePad,
   saveIndex,
   savePadNow,
+  trashPad,
 } from "../storage";
+
+/** Collision-proof pad id (timestamp + random suffix). */
+function newPadId(): string {
+  return `pad-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 /**
  * Owns all workspace state (pads, contents, active selection, settings) and the
@@ -94,7 +100,7 @@ export function useWorkspace() {
     if (!index) return;
     const used = index.pads.map((p) => p.color);
     const now = Date.now();
-    const id = `pad-${now}`;
+    const id = newPadId();
     const pad: PadMeta = {
       id,
       title: "Sketchpad",
@@ -109,18 +115,47 @@ export function useWorkspace() {
   }, [index, persistIndex]);
 
   const removePad = useCallback(
-    (id: string) => {
+    async (id: string) => {
       if (!index || index.pads.length <= 1) return;
+      const meta = index.pads.find((p) => p.id === id);
+      if (!meta) return;
+      // Persist the latest edits first so the trashed copy is complete, then
+      // move to trash. Only drop the pad from the index once trashing succeeds,
+      // so a failed move never makes the pad silently vanish.
+      saver.current.cancel(id);
+      try {
+        await savePadNow(id, contents[id] ?? "");
+        await trashPad(meta); // soft-delete: recoverable from Trash
+      } catch (err) {
+        console.error("trash failed; keeping pad", err);
+        return;
+      }
       const remaining = index.pads.filter((p) => p.id !== id);
       const nextActive = activeId === id ? (remaining[0]?.id ?? null) : activeId;
-      void deletePadOnDisk(id);
       setContents((c) => {
         const { [id]: _drop, ...rest } = c;
         return rest;
       });
       persistIndex({ ...index, pads: remaining, activePadId: nextActive });
     },
-    [index, activeId, persistIndex],
+    [index, activeId, contents, persistIndex],
+  );
+
+  /** Bring a trashed pad back into the workspace. */
+  const restoreFromTrash = useCallback(
+    async (id: string) => {
+      if (!index) return;
+      if (index.pads.some((p) => p.id === id)) return;
+      const { meta, content } = await restorePad(id);
+      const restored: PadMeta = { ...meta, order: index.pads.length };
+      setContents((c) => ({ ...c, [id]: content }));
+      persistIndex({
+        ...index,
+        pads: [...index.pads, restored],
+        activePadId: id,
+      });
+    },
+    [index, persistIndex],
   );
 
   const renamePad = useCallback(
@@ -180,7 +215,7 @@ export function useWorkspace() {
       if (!index) return;
       const used = index.pads.map((p) => p.color);
       const now = Date.now();
-      const id = `pad-${now}`;
+      const id = newPadId();
       const pad: PadMeta = {
         id,
         title: title || "Sketchpad",
@@ -242,6 +277,7 @@ export function useWorkspace() {
     setTheme,
     importPad,
     restoreContent,
+    restoreFromTrash,
     flush,
   };
 }

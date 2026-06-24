@@ -117,15 +117,20 @@ pub fn run() {
     #[cfg(desktop)]
     {
         use tauri_plugin_global_shortcut::ShortcutState;
-        builder = builder.plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        toggle_window(app);
-                    }
-                })
-                .build(),
-        );
+        builder = builder
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ))
+            .plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .with_handler(|app, _shortcut, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            toggle_window(app);
+                        }
+                    })
+                    .build(),
+            );
     }
 
     builder
@@ -143,7 +148,10 @@ pub fn run() {
             storage::load_workspace,
             storage::save_index,
             storage::save_pad,
-            storage::delete_pad,
+            storage::trash_pad,
+            storage::list_trash,
+            storage::restore_pad,
+            storage::delete_trash,
             storage::list_revisions,
             storage::read_revision,
             storage::force_snapshot,

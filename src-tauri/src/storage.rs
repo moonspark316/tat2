@@ -258,10 +258,102 @@ pub fn save_pad(app: AppHandle, id: String, content: String) -> Result<(), Strin
     Ok(())
 }
 
+// ---- Trash (recoverable soft-delete) ----
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TrashEntry {
+    pub meta: PadMeta,
+    #[serde(rename = "deletedAt")]
+    pub deleted_at: u64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct RestoredPad {
+    pub meta: PadMeta,
+    pub content: String,
+}
+
+fn trash_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(workspace_dir(app)?.join("trash"))
+}
+
+fn move_path(from: &Path, to: &Path) -> Result<(), String> {
+    if !from.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = to.parent() {
+        ensure_dir(parent)?;
+    }
+    let _ = fs::remove_dir_all(to);
+    let _ = fs::remove_file(to);
+    fs::rename(from, to).map_err(|e| format!("move {}: {e}", from.display()))
+}
+
+/// Soft-delete: move the pad's content + history into the trash, keeping meta so
+/// it can be fully restored. Nothing is ever hard-deleted here.
 #[tauri::command]
-pub fn delete_pad(app: AppHandle, id: String) -> Result<(), String> {
-    let _ = fs::remove_file(pad_path(&app, &id)?);
-    let _ = fs::remove_dir_all(history_dir(&app, &id)?);
+pub fn trash_pad(app: AppHandle, meta: PadMeta) -> Result<(), String> {
+    let id = meta.id.clone();
+    let trash = trash_dir(&app)?;
+    move_path(&pad_path(&app, &id)?, &trash.join(format!("{id}.md")))?;
+    move_path(&history_dir(&app, &id)?, &trash.join("history").join(&id))?;
+    let entry = TrashEntry {
+        meta,
+        deleted_at: now_ms(),
+    };
+    let json = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
+    atomic_write(&trash.join(format!("{id}.json")), &json)
+}
+
+#[tauri::command]
+pub fn list_trash(app: AppHandle) -> Result<Vec<TrashEntry>, String> {
+    let trash = trash_dir(&app)?;
+    let mut entries: Vec<TrashEntry> = vec![];
+    if let Ok(rd) = fs::read_dir(&trash) {
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".json") {
+                if let Ok(s) = fs::read_to_string(e.path()) {
+                    if let Ok(entry) = serde_json::from_str::<TrashEntry>(&s) {
+                        entries.push(entry);
+                    }
+                }
+            }
+        }
+    }
+    entries.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+    Ok(entries)
+}
+
+/// Move a trashed pad's files back and return its meta + content.
+#[tauri::command]
+pub fn restore_pad(app: AppHandle, id: String) -> Result<RestoredPad, String> {
+    // Never overwrite a live pad of the same id.
+    if pad_path(&app, &id)?.exists() {
+        return Err(format!("a pad with id {id} already exists"));
+    }
+    let trash = trash_dir(&app)?;
+    let json = fs::read_to_string(trash.join(format!("{id}.json")))
+        .map_err(|e| format!("trash entry: {e}"))?;
+    let entry: TrashEntry = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    move_path(&trash.join(format!("{id}.md")), &pad_path(&app, &id)?)?;
+    move_path(&trash.join("history").join(&id), &history_dir(&app, &id)?)?;
+    let _ = fs::remove_file(trash.join(format!("{id}.json")));
+    let content = read_pad(&app, &id);
+    Ok(RestoredPad {
+        meta: entry.meta,
+        content,
+    })
+}
+
+/// Permanently delete a trashed pad.
+#[tauri::command]
+pub fn delete_trash(app: AppHandle, id: String) -> Result<(), String> {
+    let trash = trash_dir(&app)?;
+    let _ = fs::remove_file(trash.join(format!("{id}.md")));
+    let _ = fs::remove_file(trash.join(format!("{id}.json")));
+    let _ = fs::remove_dir_all(trash.join("history").join(&id));
     Ok(())
 }
 
