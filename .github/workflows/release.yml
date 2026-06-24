@@ -35,6 +35,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Self-hosted runners persist ~/setup-pnpm between jobs, which makes
+      # pnpm/action-setup fail with ENOTEMPTY when it recreates the dir.
+      - name: Clear stale pnpm setup dir (self-hosted)
+        if: ${{ runner.environment == 'self-hosted' }}
+        run: rm -rf ~/setup-pnpm
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10
