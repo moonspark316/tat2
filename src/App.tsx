@@ -30,17 +30,21 @@ import "./App.css";
 
 const BEFORE_QUIT_EVENT = "tat2://before-quit";
 
+/** The mutually-exclusive full-screen overlays. */
+type Overlay = "none" | "settings" | "search" | "history" | "trash";
+
 function prefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
 }
 
 export default function App() {
   const ws = useWorkspace();
-  const [showSettings, setShowSettings] = useState(false);
+  // The full-screen overlays are mutually exclusive — exactly one (or none) is
+  // up at a time — so they're one piece of state, not N booleans that can drift
+  // into illegal "two open at once" combos. Find is deliberately separate: it's
+  // a non-modal bar that floats over the editor, not an overlay.
+  const [modal, setModal] = useState<Overlay>("none");
   const [showFind, setShowFind] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [showTrash, setShowTrash] = useState(false);
   const [preview, setPreview] = useState(false);
   const [pinned, setPinnedState] = useState(false);
   const [autostartOn, setAutostartOn] = useState(false);
@@ -52,16 +56,10 @@ export default function App() {
   // Latest-value refs so the global key handler can subscribe once.
   const wsRef = useRef(ws);
   wsRef.current = ws;
-  const showSettingsRef = useRef(showSettings);
-  showSettingsRef.current = showSettings;
+  const modalRef = useRef(modal);
+  modalRef.current = modal;
   const showFindRef = useRef(showFind);
   showFindRef.current = showFind;
-  const showSearchRef = useRef(showSearch);
-  showSearchRef.current = showSearch;
-  const showHistoryRef = useRef(showHistory);
-  showHistoryRef.current = showHistory;
-  const showTrashRef = useRef(showTrash);
-  showTrashRef.current = showTrash;
   const pinnedRef = useRef(pinned);
   pinnedRef.current = pinned;
 
@@ -120,8 +118,10 @@ export default function App() {
 
   // ---- Focus the editor whenever the active pad changes ----
   useEffect(() => {
-    if (!showFind && !showSearch) textareaRef.current?.focus();
-  }, [ws.activeId, showFind, showSearch]);
+    // Don't yank focus out of an open overlay (e.g. the search input) or the
+    // find bar when switching pads underneath them.
+    if (!showFind && modal === "none") textareaRef.current?.focus();
+  }, [ws.activeId, showFind, modal]);
 
   /** Scroll a range into view + highlight it WITHOUT stealing focus (find). */
   const revealRange = useCallback((start: number, end: number) => {
@@ -160,27 +160,21 @@ export default function App() {
 
       if (e.key === "Escape") {
         e.preventDefault();
-        if (showSearchRef.current) setShowSearch(false);
-        else if (showFindRef.current) {
+        // Close the find bar first (it floats over an overlay-free editor),
+        // then any open overlay, then hide the popover.
+        if (showFindRef.current) {
           setShowFind(false);
           textareaRef.current?.focus();
-        } else if (showSettingsRef.current) setShowSettings(false);
-        else if (showHistoryRef.current) setShowHistory(false);
-        else if (showTrashRef.current) setShowTrash(false);
+        } else if (modalRef.current !== "none") setModal("none");
         else void hidePopover();
         return;
       }
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
-      // Don't fire editor shortcuts while a modal overlay is up (the overlay
-      // sits on top; mutating the workspace behind it is surprising).
-      if (
-        showHistoryRef.current ||
-        showTrashRef.current ||
-        showSettingsRef.current ||
-        showSearchRef.current
-      )
-        return;
+      // Don't fire editor shortcuts while an overlay is up (it sits on top;
+      // mutating the workspace behind it is surprising). Find is non-modal, so
+      // it doesn't block them.
+      if (modalRef.current !== "none") return;
       const w = wsRef.current;
       // Match on physical key position (e.code), not the produced character, so
       // shortcuts survive non-US layouts (AZERTY/QWERTZ) and a held Shift, where
@@ -190,7 +184,7 @@ export default function App() {
         e.preventDefault();
         if (e.shiftKey) {
           setShowFind(false);
-          setShowSearch(true);
+          setModal("search");
         } else {
           // Open (or, if already open, re-focus) the find bar.
           setShowFind(true);
@@ -286,7 +280,7 @@ export default function App() {
   };
 
   const onJump = (padId: string, offset: number, length: number) => {
-    setShowSearch(false);
+    setModal("none");
     if (padId === ws.activeId) {
       selectRange(offset, offset + length);
     } else {
@@ -315,18 +309,18 @@ export default function App() {
         onTogglePin={togglePin}
         onHistory={() => {
           setShowFind(false);
-          setShowHistory(true);
+          setModal("history");
         }}
         preview={preview}
         onTogglePreview={() => setPreview((v) => !v)}
         onToggleSettings={() => {
           setShowFind(false);
-          setShowSettings((v) => !v);
+          setModal((m) => (m === "settings" ? "none" : "settings"));
         }}
         onClose={closeWindow}
       />
 
-      {showSettings && ws.activePad ? (
+      {modal === "settings" && ws.activePad ? (
         <SettingsPanel
           pad={ws.activePad}
           fontSize={fontSize}
@@ -342,15 +336,12 @@ export default function App() {
           onImport={handleImport}
           autostartOn={autostartOn}
           onToggleAutostart={toggleAutostart}
-          onTrash={() => {
-            setShowSettings(false);
-            setShowTrash(true);
-          }}
+          onTrash={() => setModal("trash")}
           onDelete={() => {
             ws.removePad(ws.activePad!.id);
-            setShowSettings(false);
+            setModal("none");
           }}
-          onClose={() => setShowSettings(false)}
+          onClose={() => setModal("none")}
         />
       ) : null}
 
@@ -379,31 +370,31 @@ export default function App() {
 
       <StatusBar content={ws.activeContent} />
 
-      {showSearch ? (
+      {modal === "search" ? (
         <SearchOverlay
           pads={ws.index.pads}
           contents={ws.contents}
           onJump={onJump}
-          onClose={() => setShowSearch(false)}
+          onClose={() => setModal("none")}
         />
       ) : null}
 
-      {showHistory && ws.activePad ? (
+      {modal === "history" && ws.activePad ? (
         <RevisionBrowser
           padId={ws.activePad.id}
           currentContent={ws.activeContent}
           onRestore={ws.restoreContent}
-          onClose={() => setShowHistory(false)}
+          onClose={() => setModal("none")}
         />
       ) : null}
 
-      {showTrash ? (
+      {modal === "trash" ? (
         <TrashView
           onRestore={async (id) => {
             await ws.restoreFromTrash(id);
-            setShowTrash(false);
+            setModal("none");
           }}
-          onClose={() => setShowTrash(false)}
+          onClose={() => setModal("none")}
         />
       ) : null}
     </div>
