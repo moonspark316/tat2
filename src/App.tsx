@@ -58,6 +58,10 @@ export default function App() {
   showFindRef.current = showFind;
   const showSearchRef = useRef(showSearch);
   showSearchRef.current = showSearch;
+  const showHistoryRef = useRef(showHistory);
+  showHistoryRef.current = showHistory;
+  const showTrashRef = useRef(showTrash);
+  showTrashRef.current = showTrash;
   const pinnedRef = useRef(pinned);
   pinnedRef.current = pinned;
 
@@ -161,11 +165,22 @@ export default function App() {
           setShowFind(false);
           textareaRef.current?.focus();
         } else if (showSettingsRef.current) setShowSettings(false);
+        else if (showHistoryRef.current) setShowHistory(false);
+        else if (showTrashRef.current) setShowTrash(false);
         else void hidePopover();
         return;
       }
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+      // Don't fire editor shortcuts while a modal overlay is up (the overlay
+      // sits on top; mutating the workspace behind it is surprising).
+      if (
+        showHistoryRef.current ||
+        showTrashRef.current ||
+        showSettingsRef.current ||
+        showSearchRef.current
+      )
+        return;
       const w = wsRef.current;
       if (e.key === "f" || e.key === "F") {
         e.preventDefault();

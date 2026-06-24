@@ -331,7 +331,7 @@ pub fn list_trash(app: AppHandle) -> Result<Vec<TrashEntry>, String> {
             }
         }
     }
-    entries.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.deleted_at));
     Ok(entries)
 }
 
