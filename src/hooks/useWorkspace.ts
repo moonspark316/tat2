@@ -254,6 +254,17 @@ export function useWorkspace() {
     [index, persistIndex],
   );
 
+  const setGlobalShortcut = useCallback(
+    (globalShortcut: string) => {
+      if (!index) return;
+      persistIndex({
+        ...index,
+        settings: { ...index.settings, globalShortcut },
+      });
+    },
+    [index, persistIndex],
+  );
+
   const flush = useCallback(() => saver.current.flushAll(), []);
 
   return {
@@ -275,6 +286,7 @@ export function useWorkspace() {
     reorderPads,
     setFontSize,
     setTheme,
+    setGlobalShortcut,
     importPad,
     restoreContent,
     restoreFromTrash,

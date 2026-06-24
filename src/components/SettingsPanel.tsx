@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import type { ColorName, PadMeta, ThemeMode } from "../types";
 import { PALETTE } from "../palette";
+import { buildAccelerator, displayShortcut } from "../lib/shortcut";
 
 const THEMES: ThemeMode[] = ["system", "light", "dark"];
 
@@ -12,6 +14,8 @@ interface SettingsProps {
   onRecolor: (c: ColorName) => void;
   onFontSize: (n: number) => void;
   onTheme: (t: ThemeMode) => void;
+  shortcut: string;
+  onSetShortcut: (accelerator: string) => Promise<void>;
   onExport: () => void;
   onImport: () => void;
   autostartOn: boolean;
@@ -30,6 +34,8 @@ export function SettingsPanel({
   onRecolor,
   onFontSize,
   onTheme,
+  shortcut,
+  onSetShortcut,
   onExport,
   onImport,
   autostartOn,
@@ -38,6 +44,33 @@ export function SettingsPanel({
   onDelete,
   onClose,
 }: SettingsProps) {
+  const [recording, setRecording] = useState(false);
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!recording) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === "Escape") {
+        setRecording(false);
+        return;
+      }
+      const accel = buildAccelerator(e);
+      if (!accel) return; // wait for a full combo
+      setRecording(false);
+      onSetShortcut(accel)
+        .then(() => setShortcutError(null))
+        .catch((err) => setShortcutError(String(err)));
+    };
+    window.addEventListener("keydown", onKey, true);
+    // Don't trap keystrokes forever if the user wanders off.
+    const timeout = setTimeout(() => setRecording(false), 5000);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      clearTimeout(timeout);
+    };
+  }, [recording, onSetShortcut]);
   return (
     <div className="settings">
       <label className="row">
@@ -87,6 +120,23 @@ export function SettingsPanel({
           <button onClick={() => onFontSize(fontSize + 1)}>A+</button>
         </div>
       </div>
+
+      <div className="row">
+        <span>Shortcut</span>
+        <button
+          className={`shortcut-btn ${recording ? "recording" : ""}`}
+          onClick={() => {
+            setShortcutError(null);
+            setRecording((r) => !r);
+          }}
+          title="Click, then press a key combo (Esc to cancel)"
+        >
+          {recording ? "Press keys…" : displayShortcut(shortcut)}
+        </button>
+      </div>
+      {shortcutError ? (
+        <div className="row shortcut-error">{shortcutError}</div>
+      ) : null}
 
       <div className="row">
         <span>Launch at login</span>

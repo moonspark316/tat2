@@ -261,6 +261,16 @@ body,
   border-color: var(--dot);
   color: #fff;
 }
+.shortcut-btn.recording {
+  background: var(--dot);
+  border-color: var(--dot);
+  color: #fff;
+}
+.shortcut-error {
+  font-size: 11px;
+  color: #c0392b;
+  display: block;
+}
 .icon-btn.md.on {
   opacity: 1;
   background: rgba(128, 128, 128, 0.18);

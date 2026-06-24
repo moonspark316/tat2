@@ -18,6 +18,10 @@ struct TrayAnchor(Mutex<Option<f64>>);
 #[derive(Default)]
 struct Pinned(Mutex<bool>);
 
+/// The currently registered global-shortcut accelerator (for safe replacement).
+#[derive(Default)]
+struct CurrentShortcut(Mutex<Option<String>>);
+
 const WINDOW_LABEL: &str = "main";
 /// Event the frontend listens for to flush pending writes before the app quits.
 const BEFORE_QUIT_EVENT: &str = "tat2://before-quit";
@@ -109,6 +113,52 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// Parse + register the global summon shortcut, then drop the previous one.
+/// On failure the previous shortcut stays active (no gap with no hotkey).
+#[cfg(desktop)]
+fn apply_shortcut(app: &tauri::AppHandle, accelerator: &str) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    // No-op if it's already the active shortcut.
+    {
+        let state = app.state::<CurrentShortcut>();
+        let cur = state.0.lock().unwrap();
+        if cur.as_deref() == Some(accelerator) {
+            return Ok(());
+        }
+    }
+
+    let sc = accelerator
+        .parse::<tauri_plugin_global_shortcut::Shortcut>()
+        .map_err(|e| format!("invalid shortcut: {e}"))?;
+    let gs = app.global_shortcut();
+    // Register the new one FIRST; only on success retire the old one.
+    gs.register(sc)
+        .map_err(|e| format!("could not register \"{accelerator}\" (already in use?): {e}"))?;
+
+    let state = app.state::<CurrentShortcut>();
+    let mut cur = state.0.lock().unwrap();
+    if let Some(prev) = cur.clone() {
+        if let Ok(prev_sc) = prev.parse::<tauri_plugin_global_shortcut::Shortcut>() {
+            let _ = gs.unregister(prev_sc);
+        }
+    }
+    *cur = Some(accelerator.to_string());
+    Ok(())
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn set_shortcut(app: tauri::AppHandle, accelerator: String) -> Result<(), String> {
+    apply_shortcut(&app, &accelerator)
+}
+
+#[cfg(not(desktop))]
+#[tauri::command]
+fn set_shortcut(_app: tauri::AppHandle, _accelerator: String) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
@@ -136,6 +186,7 @@ pub fn run() {
     builder
         .manage(TrayAnchor::default())
         .manage(Pinned::default())
+        .manage(CurrentShortcut::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -159,6 +210,7 @@ pub fn run() {
             storage::import_file,
             hide_popover,
             set_pinned,
+            set_shortcut,
             quit_app,
         ])
         .setup(|app| {
@@ -167,7 +219,8 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             // ---- Tray icon + right-click menu ----
-            let toggle_i = MenuItem::with_id(app, "toggle", "Show / Hide Tat2", true, None::<&str>)?;
+            let toggle_i =
+                MenuItem::with_id(app, "toggle", "Show / Hide Tat2", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit Tat2", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&toggle_i, &quit_i])?;
 
@@ -196,14 +249,13 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // ---- Global shortcut to summon the popover ----
+            // ---- Global shortcut to summon the popover (user-configured) ----
             #[cfg(desktop)]
             {
-                use tauri_plugin_global_shortcut::GlobalShortcutExt;
-                if let Ok(shortcut) =
-                    storage::default_shortcut().parse::<tauri_plugin_global_shortcut::Shortcut>()
-                {
-                    let _ = app.global_shortcut().register(shortcut);
+                let handle = app.handle().clone();
+                // Fall back to the platform default if the saved combo won't register.
+                if apply_shortcut(&handle, &storage::saved_shortcut(&handle)).is_err() {
+                    let _ = apply_shortcut(&handle, &storage::default_shortcut());
                 }
             }
 

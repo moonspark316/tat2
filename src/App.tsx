@@ -23,7 +23,9 @@ import {
   importFile,
   quitApp,
   setPinned,
+  setShortcut,
 } from "./storage";
+import { defaultShortcut } from "./lib/shortcut";
 import "./App.css";
 
 const BEFORE_QUIT_EVENT = "tat2://before-quit";
@@ -242,6 +244,12 @@ export default function App() {
     }
   };
 
+  // Register the new combo first; only persist it if the OS accepted it.
+  const handleSetShortcut = async (accelerator: string) => {
+    await setShortcut(accelerator);
+    ws.setGlobalShortcut(accelerator);
+  };
+
   const toggleAutostart = async () => {
     try {
       if (autostartOn) {
@@ -302,6 +310,8 @@ export default function App() {
           onRecolor={(c) => ws.recolorPad(ws.activePad!.id, c)}
           onFontSize={ws.setFontSize}
           onTheme={ws.setTheme}
+          shortcut={ws.index.settings.globalShortcut ?? defaultShortcut}
+          onSetShortcut={handleSetShortcut}
           onExport={handleExport}
           onImport={handleImport}
           autostartOn={autostartOn}

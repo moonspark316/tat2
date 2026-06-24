@@ -134,10 +134,19 @@ fn default_index() -> Index {
 
 pub fn default_shortcut() -> String {
     if cfg!(target_os = "macos") {
-        "Cmd+Shift+Space".to_string()
+        "Super+Shift+Space".to_string()
     } else {
         "Ctrl+Shift+Space".to_string()
     }
+}
+
+/// The user's configured global shortcut, or the platform default.
+pub fn saved_shortcut(app: &AppHandle) -> String {
+    read_index(app)
+        .ok()
+        .and_then(|i| i.settings.global_shortcut)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(default_shortcut)
 }
 
 fn read_index(app: &AppHandle) -> Result<Index, String> {

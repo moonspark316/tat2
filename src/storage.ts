@@ -45,6 +45,10 @@ export const hidePopover = (): Promise<void> => invoke("hide_popover");
 export const setPinned = (pinned: boolean): Promise<void> =>
   invoke("set_pinned", { pinned });
 
+/** Register a new global summon shortcut. Rejects on invalid/conflicting combo. */
+export const setShortcut = (accelerator: string): Promise<void> =>
+  invoke("set_shortcut", { accelerator });
+
 export const quitApp = (): Promise<void> => invoke("quit_app");
 
 /**
