@@ -91,7 +91,9 @@ fn flush_and_quit(app: &tauri::AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
         // Fallback: quit even if the frontend never acks (e.g. not loaded).
-        std::thread::sleep(Duration::from_millis(1500));
+        // Generous enough to let a large multi-pad flush finish on a slow disk;
+        // the frontend normally calls quit_app well before this fires.
+        std::thread::sleep(Duration::from_millis(4000));
         handle.exit(0);
     });
 }

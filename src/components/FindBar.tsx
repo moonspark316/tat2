@@ -22,15 +22,14 @@ export function FindBar({ content, focusSignal, onSelect, onClose }: FindBarProp
     inputRef.current?.select();
   }, [focusSignal]);
 
-  // Clamp + reveal the active match whenever the result set changes.
+  // Reveal the first match when the QUERY changes (find-as-you-type). Keyed on
+  // `query`, NOT `matches`, so editing the pad while Find is open does not yank
+  // the caret to a match on every keystroke.
   useEffect(() => {
-    if (matches.length === 0) return;
-    const idx = Math.min(current, matches.length - 1);
-    if (idx !== current) setCurrent(idx);
-    const m = matches[idx];
-    onSelect(m.start, m.end);
+    setCurrent(0);
+    if (matches.length > 0) onSelect(matches[0].start, matches[0].end);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matches]);
+  }, [query]);
 
   const go = (delta: number) => {
     if (matches.length === 0) return;
@@ -57,7 +56,9 @@ export function FindBar({ content, focusSignal, onSelect, onClose }: FindBarProp
         }}
       />
       <span className="find-count">
-        {query ? `${matches.length ? current + 1 : 0}/${matches.length}` : ""}
+        {query
+          ? `${matches.length ? Math.min(current, matches.length - 1) + 1 : 0}/${matches.length}`
+          : ""}
       </span>
       <button onClick={() => go(-1)} title="Previous (⇧⏎)" disabled={!matches.length}>
         ↑

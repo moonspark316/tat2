@@ -45,8 +45,11 @@ jobs:
       - name: Rust check
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
+  # Full release build is heavy (2-core box) — only on tags or manual trigger,
+  # so per-push CI stays fast (check + tests).
   build-linux:
     name: Build (Linux, obx2)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: check
     runs-on: [self-hosted, obx2]
     steps:

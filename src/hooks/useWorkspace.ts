@@ -123,6 +123,7 @@ export function useWorkspace() {
       // move to trash. Only drop the pad from the index once trashing succeeds,
       // so a failed move never makes the pad silently vanish.
       saver.current.cancel(id);
+      await saver.current.idle(id); // let any in-flight save finish first
       try {
         await savePadNow(id, contents[id] ?? "");
         await trashPad(meta); // soft-delete: recoverable from Trash
@@ -236,8 +237,10 @@ export function useWorkspace() {
   const restoreContent = useCallback(
     async (content: string) => {
       if (!activeId) return;
-      // Drop any pending debounced save so it can't overwrite the restore.
+      // Drop the queued save and wait out any in-flight one so neither can
+      // overwrite the restored content.
       saver.current.cancel(activeId);
+      await saver.current.idle(activeId);
       const current = contents[activeId] ?? "";
       if (current.length > 0) await forceSnapshot(activeId, current);
       setContents((c) => ({ ...c, [activeId]: content }));

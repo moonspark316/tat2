@@ -61,6 +61,8 @@ export const quitApp = (): Promise<void> => invoke("quit_app");
 export class AutoSaver {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private pending = new Map<string, string>();
+  /** Writes that have started (savePadNow in progress) — awaitable via idle(). */
+  private inflight = new Map<string, Promise<void>>();
   private delay: number;
 
   constructor(delayMs = 400) {
@@ -80,24 +82,36 @@ export class AutoSaver {
     );
   }
 
-  private async flushOne(id: string) {
-    const content = this.pending.get(id);
+  private flushOne(id: string): Promise<void> {
     const timer = this.timers.get(id);
     if (timer) clearTimeout(timer);
     this.timers.delete(id);
-    if (content === undefined) return;
+    const content = this.pending.get(id);
+    // Nothing queued — return any in-flight write so callers can await it.
+    if (content === undefined) return this.inflight.get(id) ?? Promise.resolve();
     this.pending.delete(id);
-    try {
-      await savePadNow(id, content);
-    } catch (err) {
-      // Never fail loudly: requeue and try again shortly.
-      console.error("autosave retry", err);
-      this.queue(id, content);
-    }
+
+    const prior = this.inflight.get(id);
+    const run = (async () => {
+      // Preserve write ordering: never start before the previous write finishes.
+      if (prior) await prior.catch(() => {});
+      try {
+        await savePadNow(id, content);
+      } catch (err) {
+        // Never fail loudly: requeue and try again shortly.
+        console.error("autosave retry", err);
+        this.queue(id, content);
+      }
+    })();
+    this.inflight.set(id, run);
+    void run.finally(() => {
+      if (this.inflight.get(id) === run) this.inflight.delete(id);
+    });
+    return run;
   }
 
-  /** Drop any queued write for a pad (e.g. before restoring a revision so a
-   *  stale debounced save can't overwrite the restored content). */
+  /** Drop any QUEUED (not-yet-started) write for a pad. Does not abort an
+   *  in-flight write — use idle(id) to await that. */
   cancel(id: string) {
     const timer = this.timers.get(id);
     if (timer) clearTimeout(timer);
@@ -105,9 +119,18 @@ export class AutoSaver {
     this.pending.delete(id);
   }
 
-  /** Persist everything that is still pending, immediately. */
+  /** Resolve once any in-flight write for a pad has finished, so destructive
+   *  ops (trash/restore) can't be overtaken by a late save recreating the file. */
+  async idle(id: string): Promise<void> {
+    await this.inflight.get(id)?.catch(() => {});
+  }
+
+  /** Persist everything pending and await all in-flight writes. */
   async flushAll(): Promise<void> {
-    const ids = [...this.pending.keys()];
-    await Promise.all(ids.map((id) => this.flushOne(id)));
+    const ids = new Set<string>([
+      ...this.pending.keys(),
+      ...this.inflight.keys(),
+    ]);
+    await Promise.all([...ids].map((id) => this.flushOne(id)));
   }
 }
