@@ -18,6 +18,9 @@ jobs:
   check:
     name: Typecheck + cargo check
     runs-on: [self-hosted, obx2]
+    # Shared cargo target across all obx2 runners → one cold compile, then fast.
+    env:
+      CARGO_TARGET_DIR: /home/ubuntu/cargo-target-tat2
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +55,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: check
     runs-on: [self-hosted, obx2]
+    env:
+      CARGO_TARGET_DIR: /home/ubuntu/cargo-target-tat2
     steps:
       - uses: actions/checkout@v4
 

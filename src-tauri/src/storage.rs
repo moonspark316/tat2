@@ -286,6 +286,29 @@ fn trash_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(workspace_dir(app)?.join("trash"))
 }
 
+/// Synthetic metadata for a trashed pad whose `<id>.json` is missing or corrupt,
+/// so its content is still listable and restorable (never silently lost).
+fn recovered_meta(id: &str) -> PadMeta {
+    PadMeta {
+        id: id.to_string(),
+        title: "Recovered sketchpad".to_string(),
+        color: "amber".to_string(),
+        order: 0,
+        created_at: 0,
+        updated_at: 0,
+    }
+}
+
+/// File modification time in epoch-ms, for ordering recovered entries.
+fn file_mtime_ms(path: &Path) -> Option<u64> {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as u64)
+}
+
 fn move_path(from: &Path, to: &Path) -> Result<(), String> {
     if !from.exists() {
         return Ok(());
@@ -318,6 +341,7 @@ pub fn trash_pad(app: AppHandle, meta: PadMeta) -> Result<(), String> {
 pub fn list_trash(app: AppHandle) -> Result<Vec<TrashEntry>, String> {
     let trash = trash_dir(&app)?;
     let mut entries: Vec<TrashEntry> = vec![];
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     if let Ok(rd) = fs::read_dir(&trash) {
         for e in rd.flatten() {
             let name = e.file_name();
@@ -325,13 +349,32 @@ pub fn list_trash(app: AppHandle) -> Result<Vec<TrashEntry>, String> {
             if name.ends_with(".json") {
                 if let Ok(s) = fs::read_to_string(e.path()) {
                     if let Ok(entry) = serde_json::from_str::<TrashEntry>(&s) {
+                        seen.insert(entry.meta.id.clone());
                         entries.push(entry);
                     }
                 }
             }
         }
     }
-    entries.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+    // Recover orphans: a trashed `<id>.md` with no valid `<id>.json` metadata
+    // (corrupt/partially-written JSON) must still be listable and restorable —
+    // the trash promise is that nothing is ever silently lost.
+    if let Ok(rd) = fs::read_dir(&trash) {
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if let Some(id) = name.strip_suffix(".md") {
+                if !seen.contains(id) {
+                    seen.insert(id.to_string());
+                    entries.push(TrashEntry {
+                        meta: recovered_meta(id),
+                        deleted_at: file_mtime_ms(&e.path()).unwrap_or(0),
+                    });
+                }
+            }
+        }
+    }
+    entries.sort_by_key(|e| std::cmp::Reverse(e.deleted_at));
     Ok(entries)
 }
 
@@ -343,17 +386,22 @@ pub fn restore_pad(app: AppHandle, id: String) -> Result<RestoredPad, String> {
         return Err(format!("a pad with id {id} already exists"));
     }
     let trash = trash_dir(&app)?;
-    let json = fs::read_to_string(trash.join(format!("{id}.json")))
-        .map_err(|e| format!("trash entry: {e}"))?;
-    let entry: TrashEntry = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    move_path(&trash.join(format!("{id}.md")), &pad_path(&app, &id)?)?;
+    let md_src = trash.join(format!("{id}.md"));
+    if !md_src.exists() {
+        return Err(format!("nothing to restore for {id}"));
+    }
+    // Tolerate missing/corrupt metadata: recover with synthetic meta rather than
+    // refusing to restore (which would strand the content in the trash forever).
+    let meta = fs::read_to_string(trash.join(format!("{id}.json")))
+        .ok()
+        .and_then(|s| serde_json::from_str::<TrashEntry>(&s).ok())
+        .map(|entry| entry.meta)
+        .unwrap_or_else(|| recovered_meta(&id));
+    move_path(&md_src, &pad_path(&app, &id)?)?;
     move_path(&trash.join("history").join(&id), &history_dir(&app, &id)?)?;
     let _ = fs::remove_file(trash.join(format!("{id}.json")));
     let content = read_pad(&app, &id);
-    Ok(RestoredPad {
-        meta: entry.meta,
-        content,
-    })
+    Ok(RestoredPad { meta, content })
 }
 
 /// Permanently delete a trashed pad.

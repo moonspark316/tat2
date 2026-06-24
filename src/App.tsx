@@ -58,6 +58,10 @@ export default function App() {
   showFindRef.current = showFind;
   const showSearchRef = useRef(showSearch);
   showSearchRef.current = showSearch;
+  const showHistoryRef = useRef(showHistory);
+  showHistoryRef.current = showHistory;
+  const showTrashRef = useRef(showTrash);
+  showTrashRef.current = showTrash;
   const pinnedRef = useRef(pinned);
   pinnedRef.current = pinned;
 
@@ -161,33 +165,49 @@ export default function App() {
           setShowFind(false);
           textareaRef.current?.focus();
         } else if (showSettingsRef.current) setShowSettings(false);
+        else if (showHistoryRef.current) setShowHistory(false);
+        else if (showTrashRef.current) setShowTrash(false);
         else void hidePopover();
         return;
       }
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+      // Don't fire editor shortcuts while a modal overlay is up (the overlay
+      // sits on top; mutating the workspace behind it is surprising).
+      if (
+        showHistoryRef.current ||
+        showTrashRef.current ||
+        showSettingsRef.current ||
+        showSearchRef.current
+      )
+        return;
       const w = wsRef.current;
-      if (e.key === "f" || e.key === "F") {
+      // Match on physical key position (e.code), not the produced character, so
+      // shortcuts survive non-US layouts (AZERTY/QWERTZ) and a held Shift, where
+      // e.key for the digit/bracket row is "!"/"&"/"ü" etc.
+      const digit = /^Digit([1-9])$/.exec(e.code);
+      if (e.code === "KeyF") {
         e.preventDefault();
         if (e.shiftKey) {
+          setShowFind(false);
           setShowSearch(true);
         } else {
           // Open (or, if already open, re-focus) the find bar.
           setShowFind(true);
           setFindFocus((n) => n + 1);
         }
-      } else if (e.key === "n" || e.key === "N") {
+      } else if (e.code === "KeyN") {
         e.preventDefault();
         w.addPad();
-      } else if (e.key === "[") {
+      } else if (e.code === "BracketLeft") {
         e.preventDefault();
         w.switchByOffset(-1);
-      } else if (e.key === "]") {
+      } else if (e.code === "BracketRight") {
         e.preventDefault();
         w.switchByOffset(1);
-      } else if (e.key >= "1" && e.key <= "9") {
+      } else if (digit) {
         e.preventDefault();
-        w.switchByPosition(Number(e.key) - 1);
+        w.switchByPosition(Number(digit[1]) - 1);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -293,10 +313,16 @@ export default function App() {
         onRename={ws.renamePad}
         onReorder={ws.reorderPads}
         onTogglePin={togglePin}
-        onHistory={() => setShowHistory(true)}
+        onHistory={() => {
+          setShowFind(false);
+          setShowHistory(true);
+        }}
         preview={preview}
         onTogglePreview={() => setPreview((v) => !v)}
-        onToggleSettings={() => setShowSettings((v) => !v)}
+        onToggleSettings={() => {
+          setShowFind(false);
+          setShowSettings((v) => !v);
+        }}
         onClose={closeWindow}
       />
 
