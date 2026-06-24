@@ -24,6 +24,15 @@ export const readRevision = (id: string, ts: number): Promise<string> =>
 export const forceSnapshot = (id: string, content: string): Promise<void> =>
   invoke("force_snapshot", { id, content });
 
+// ---- Window controls ----
+
+export const hidePopover = (): Promise<void> => invoke("hide_popover");
+
+export const setPinned = (pinned: boolean): Promise<void> =>
+  invoke("set_pinned", { pinned });
+
+export const quitApp = (): Promise<void> => invoke("quit_app");
+
 /**
  * Invisible autosave engine.
  *

@@ -1,11 +1,12 @@
 mod storage;
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, PhysicalPosition, WindowEvent,
+    Emitter, Manager, PhysicalPosition, WindowEvent,
 };
 
 /// Remembers the horizontal center (physical px) of the last tray click so the
@@ -13,7 +14,13 @@ use tauri::{
 #[derive(Default)]
 struct TrayAnchor(Mutex<Option<f64>>);
 
+/// When pinned, the popover does NOT auto-hide on blur (reference mode).
+#[derive(Default)]
+struct Pinned(Mutex<bool>);
+
 const WINDOW_LABEL: &str = "main";
+/// Event the frontend listens for to flush pending writes before the app quits.
+const BEFORE_QUIT_EVENT: &str = "tat2://before-quit";
 
 /// Place the popover just under the menu bar, horizontally centered on the
 /// tray icon (falling back to the top-right corner of the primary display).
@@ -55,6 +62,14 @@ fn position_window(app: &tauri::AppHandle) {
     let _ = win.set_position(PhysicalPosition::new(x as i32, y as i32));
 }
 
+fn show_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
+        position_window(app);
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
 fn toggle_window(app: &tauri::AppHandle) {
     let Some(win) = app.get_webview_window(WINDOW_LABEL) else {
         return;
@@ -62,10 +77,36 @@ fn toggle_window(app: &tauri::AppHandle) {
     if win.is_visible().unwrap_or(false) {
         let _ = win.hide();
     } else {
-        position_window(app);
-        let _ = win.show();
-        let _ = win.set_focus();
+        show_window(app);
     }
+}
+
+/// Ask the frontend to flush, then exit shortly after (with a hard fallback).
+fn flush_and_quit(app: &tauri::AppHandle) {
+    let _ = app.emit(BEFORE_QUIT_EVENT, ());
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        // Fallback: quit even if the frontend never acks (e.g. not loaded).
+        std::thread::sleep(Duration::from_millis(1500));
+        handle.exit(0);
+    });
+}
+
+// ---- Window control commands callable from the frontend ----
+
+#[tauri::command]
+fn hide_popover(window: tauri::Window) {
+    let _ = window.hide();
+}
+
+#[tauri::command]
+fn set_pinned(app: tauri::AppHandle, pinned: bool) {
+    *app.state::<Pinned>().0.lock().unwrap() = pinned;
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -89,7 +130,14 @@ pub fn run() {
 
     builder
         .manage(TrayAnchor::default())
+        .manage(Pinned::default())
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                // Remember the size the user picked, but let us anchor position.
+                .with_state_flags(tauri_plugin_window_state::StateFlags::SIZE)
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             storage::load_workspace,
             storage::save_index,
@@ -98,6 +146,9 @@ pub fn run() {
             storage::list_revisions,
             storage::read_revision,
             storage::force_snapshot,
+            hide_popover,
+            set_pinned,
+            quit_app,
         ])
         .setup(|app| {
             // No dock icon on macOS — Tat2 lives in the menu bar.
@@ -116,7 +167,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "toggle" => toggle_window(app),
-                    "quit" => app.exit(0),
+                    "quit" => flush_and_quit(app),
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -145,13 +196,22 @@ pub fn run() {
                 }
             }
 
-            // ---- Menubar behavior: hide when focus is lost ----
+            // ---- Menubar behavior: hide when focus is lost (unless pinned) ----
             if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
                 let w = win.clone();
-                win.on_window_event(move |event| {
-                    if let WindowEvent::Focused(false) = event {
+                win.on_window_event(move |event| match event {
+                    WindowEvent::Focused(false) => {
+                        let pinned = *w.app_handle().state::<Pinned>().0.lock().unwrap();
+                        if !pinned {
+                            let _ = w.hide();
+                        }
+                    }
+                    WindowEvent::CloseRequested { api, .. } => {
+                        // Closing the window just hides the popover; quit via tray.
+                        api.prevent_close();
                         let _ = w.hide();
                     }
+                    _ => {}
                 });
             }
 
