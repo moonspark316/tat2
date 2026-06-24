@@ -79,16 +79,29 @@ system tray**, or press the global shortcut:
 
 ---
 
+## What works today
+
+- Menu-bar/tray icon + configurable global shortcut summon a frameless popover
+- Multiple colored sketchpads — add, switch, drag-reorder, inline rename, recolor
+- Invisible, atomic, crash-safe autosave (no save UI, ever); flush on quit
+- Revision history browser with line-level **diff** and one-click restore
+- **Trash** with restore / permanent delete — deleting never loses data
+- Find-in-pad (`⌘F`) and search across all pads (`⌘⇧F`)
+- Light / dark / system theme; adjustable text size
+- Markdown preview (sanitized); export / import pads
+- Launch-at-login; pin-to-keep-open; remembers window size
+- Keyboard: `⌘N` new · `⌘1‑9` switch · `⌘[`/`⌘]` prev/next · `Esc` hide
+
 ## Roadmap
 
-Tracked as GitHub epics & issues. Highlights:
+Tracked as GitHub epics & issues.
 
-- **Foundation** — tray + shortcut + frameless popover *(done in MVP)*
-- **Persistence & history** — atomic autosave *(done)*, in-app revision browser
-- **Sync** — Automerge document model, end-to-end-encrypted relay, multi-device
-- **UX** — markdown rendering, search across pads, drag-reorder, themes
-- **Cross-platform polish** — tray positioning per-OS, auto-update, signing
-- **Release** — code signing/notarization, installers, CI
+- **Sync** *(designed — see [docs/SYNC_DESIGN.md](docs/SYNC_DESIGN.md))* —
+  Automerge CRDT model, offline queue, end-to-end-encrypted relay, device pairing
+- **Cross-platform polish** — Windows/Linux tray anchoring, HiDPI/multi-monitor
+  *(needs testing on those OSes)*
+- **Release** — code signing/notarization, auto-update *(needs certs + keys)*;
+  CI builds unsigned bundles for all three OSes today
 
 ---
 

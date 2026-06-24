@@ -1,0 +1,33 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FBF6E9"/>
+      <stop offset="1" stop-color="#F1E3C2"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Card -->
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="url(#card)"/>
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="none" stroke="#000000" stroke-opacity="0.06" stroke-width="2"/>
+
+  <!-- Signature row of seven colored sketchpad dots -->
+  <g>
+    <circle cx="232" cy="372" r="34" fill="#E3B341"/>
+    <circle cx="325" cy="372" r="34" fill="#E08B3C"/>
+    <circle cx="418" cy="372" r="34" fill="#D95757"/>
+    <circle cx="512" cy="372" r="34" fill="#8B5CF6"/>
+    <circle cx="606" cy="372" r="34" fill="#4A90D9"/>
+    <circle cx="699" cy="372" r="34" fill="#38B2AC"/>
+    <circle cx="792" cy="372" r="34" fill="#5FA85F"/>
+  </g>
+
+  <!-- Note lines, suggesting a sketchpad -->
+  <g fill="#C9B584">
+    <rect x="232" y="520" width="560" height="58" rx="29"/>
+    <rect x="232" y="620" width="430" height="58" rx="29"/>
+    <rect x="232" y="720" width="510" height="58" rx="29"/>
+  </g>
+
+  <!-- Caret accent at the end of the last line -->
+  <rect x="762" y="712" width="6" height="74" rx="3" fill="#3a3326" opacity="0.55"/>
+</svg>
