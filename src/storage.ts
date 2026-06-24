@@ -24,6 +24,12 @@ export const readRevision = (id: string, ts: number): Promise<string> =>
 export const forceSnapshot = (id: string, content: string): Promise<void> =>
   invoke("force_snapshot", { id, content });
 
+export const exportPad = (id: string, dest: string): Promise<void> =>
+  invoke("export_pad", { id, dest });
+
+export const importFile = (path: string): Promise<string> =>
+  invoke("import_file", { path });
+
 // ---- Window controls ----
 
 export const hidePopover = (): Promise<void> => invoke("hide_popover");
@@ -76,6 +82,15 @@ export class AutoSaver {
       console.error("autosave retry", err);
       this.queue(id, content);
     }
+  }
+
+  /** Drop any queued write for a pad (e.g. before restoring a revision so a
+   *  stale debounced save can't overwrite the restored content). */
+  cancel(id: string) {
+    const timer = this.timers.get(id);
+    if (timer) clearTimeout(timer);
+    this.timers.delete(id);
+    this.pending.delete(id);
   }
 
   /** Persist everything that is still pending, immediately. */

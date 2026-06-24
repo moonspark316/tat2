@@ -12,6 +12,8 @@ interface SettingsProps {
   onRecolor: (c: ColorName) => void;
   onFontSize: (n: number) => void;
   onTheme: (t: ThemeMode) => void;
+  onExport: () => void;
+  onImport: () => void;
   onDelete: () => void;
   onClose: () => void;
 }
@@ -25,6 +27,8 @@ export function SettingsPanel({
   onRecolor,
   onFontSize,
   onTheme,
+  onExport,
+  onImport,
   onDelete,
   onClose,
 }: SettingsProps) {
@@ -75,6 +79,14 @@ export function SettingsPanel({
           <button onClick={() => onFontSize(fontSize - 1)}>A−</button>
           <span>{fontSize}</span>
           <button onClick={() => onFontSize(fontSize + 1)}>A+</button>
+        </div>
+      </div>
+
+      <div className="row">
+        <span>File</span>
+        <div className="stepper">
+          <button onClick={onExport}>Export…</button>
+          <button onClick={onImport}>Import…</button>
         </div>
       </div>
 

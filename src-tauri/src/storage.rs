@@ -291,6 +291,19 @@ pub fn read_revision(app: AppHandle, id: String, ts: u64) -> Result<String, Stri
     fs::read_to_string(&path).map_err(|e| format!("read revision: {e}"))
 }
 
+/// Write a pad's current content to an arbitrary destination path (export).
+#[tauri::command]
+pub fn export_pad(app: AppHandle, id: String, dest: String) -> Result<(), String> {
+    let content = read_pad(&app, &id);
+    atomic_write(Path::new(&dest), &content)
+}
+
+/// Read an external file's text (import). Returns its contents.
+#[tauri::command]
+pub fn import_file(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))
+}
+
 /// Force a snapshot now (used before destructive actions like restoring).
 #[tauri::command]
 pub fn force_snapshot(app: AppHandle, id: String, content: String) -> Result<(), String> {

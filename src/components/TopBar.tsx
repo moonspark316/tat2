@@ -13,6 +13,7 @@ interface TopBarProps {
   onRename: (id: string, title: string) => void;
   onReorder: (orderedIds: string[]) => void;
   onTogglePin: () => void;
+  onHistory: () => void;
   onToggleSettings: () => void;
   onClose: () => void;
 }
@@ -27,6 +28,7 @@ export function TopBar({
   onRename,
   onReorder,
   onTogglePin,
+  onHistory,
   onToggleSettings,
   onClose,
 }: TopBarProps) {
@@ -97,6 +99,9 @@ export function TopBar({
         </button>
       </div>
 
+      <button className="icon-btn history" onClick={onHistory} title="History">
+        🕘
+      </button>
       <button
         className={`icon-btn pin ${pinned ? "on" : ""}`}
         onClick={onTogglePin}

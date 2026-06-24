@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { swatch, themeVars } from "./palette";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { TopBar } from "./components/TopBar";
@@ -8,7 +9,14 @@ import { StatusBar } from "./components/StatusBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { FindBar } from "./components/FindBar";
 import { SearchOverlay } from "./components/SearchOverlay";
-import { hidePopover, quitApp, setPinned } from "./storage";
+import { RevisionBrowser } from "./components/RevisionBrowser";
+import {
+  exportPad,
+  hidePopover,
+  importFile,
+  quitApp,
+  setPinned,
+} from "./storage";
 import "./App.css";
 
 const BEFORE_QUIT_EVENT = "tat2://before-quit";
@@ -22,6 +30,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showFind, setShowFind] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [pinned, setPinnedState] = useState(false);
   const [systemDark, setSystemDark] = useState(prefersDark);
   const [findFocus, setFindFocus] = useState(0);
@@ -37,6 +46,8 @@ export default function App() {
   showFindRef.current = showFind;
   const showSearchRef = useRef(showSearch);
   showSearchRef.current = showSearch;
+  const pinnedRef = useRef(pinned);
+  pinnedRef.current = pinned;
 
   // ---- Flush pending writes whenever focus/visibility is lost ----
   useEffect(() => {
@@ -174,6 +185,46 @@ export default function App() {
     void ws.flush().then(() => hidePopover());
   };
 
+  // Native file dialogs steal focus; pin the popover so it doesn't auto-hide,
+  // then restore the user's pin preference afterwards.
+  const handleExport = async () => {
+    if (!ws.activePad) return;
+    const raw =
+      ws.activePad.title && ws.activePad.title !== "Sketchpad"
+        ? ws.activePad.title
+        : "sketchpad";
+    const name = raw.replace(/[^\w.-]+/g, "_") || "sketchpad";
+    // Persist the latest keystrokes first — export reads from disk.
+    await ws.flush();
+    await setPinned(true);
+    try {
+      const dest = await save({
+        defaultPath: `${name}.md`,
+        filters: [{ name: "Markdown / Text", extensions: ["md", "txt"] }],
+      });
+      if (dest) await exportPad(ws.activePad.id, dest);
+    } finally {
+      await setPinned(pinnedRef.current);
+    }
+  };
+
+  const handleImport = async () => {
+    await setPinned(true);
+    try {
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "Text", extensions: ["md", "markdown", "txt"] }],
+      });
+      if (typeof path === "string") {
+        const content = await importFile(path);
+        const base = path.split(/[\\/]/).pop() ?? "Imported";
+        ws.importPad(base.replace(/\.[^.]+$/, ""), content);
+      }
+    } finally {
+      await setPinned(pinnedRef.current);
+    }
+  };
+
   const onJump = (padId: string, offset: number, length: number) => {
     setShowSearch(false);
     if (padId === ws.activeId) {
@@ -202,6 +253,7 @@ export default function App() {
         onRename={ws.renamePad}
         onReorder={ws.reorderPads}
         onTogglePin={togglePin}
+        onHistory={() => setShowHistory(true)}
         onToggleSettings={() => setShowSettings((v) => !v)}
         onClose={closeWindow}
       />
@@ -216,6 +268,8 @@ export default function App() {
           onRecolor={(c) => ws.recolorPad(ws.activePad!.id, c)}
           onFontSize={ws.setFontSize}
           onTheme={ws.setTheme}
+          onExport={handleExport}
+          onImport={handleImport}
           onDelete={() => {
             ws.removePad(ws.activePad!.id);
             setShowSettings(false);
@@ -251,6 +305,15 @@ export default function App() {
           contents={ws.contents}
           onJump={onJump}
           onClose={() => setShowSearch(false)}
+        />
+      ) : null}
+
+      {showHistory && ws.activePad ? (
+        <RevisionBrowser
+          padId={ws.activePad.id}
+          currentContent={ws.activeContent}
+          onRestore={ws.restoreContent}
+          onClose={() => setShowHistory(false)}
         />
       ) : null}
     </div>

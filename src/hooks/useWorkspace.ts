@@ -4,6 +4,7 @@ import { nextColor } from "../palette";
 import {
   AutoSaver,
   deletePad as deletePadOnDisk,
+  forceSnapshot,
   loadWorkspace,
   saveIndex,
   savePadNow,
@@ -173,6 +174,43 @@ export function useWorkspace() {
     [index, persistIndex],
   );
 
+  /** Create a pad pre-filled with imported content. */
+  const importPad = useCallback(
+    (title: string, content: string) => {
+      if (!index) return;
+      const used = index.pads.map((p) => p.color);
+      const now = Date.now();
+      const id = `pad-${now}`;
+      const pad: PadMeta = {
+        id,
+        title: title || "Sketchpad",
+        color: nextColor(used),
+        order: index.pads.length,
+        createdAt: now,
+        updatedAt: now,
+      };
+      setContents((c) => ({ ...c, [id]: content }));
+      void savePadNow(id, content);
+      persistIndex({ ...index, pads: [...index.pads, pad], activePadId: id });
+    },
+    [index, persistIndex],
+  );
+
+  /** Replace the active pad's content (e.g. restoring a revision), snapshotting
+   *  the current content first so the restore itself is reversible. */
+  const restoreContent = useCallback(
+    async (content: string) => {
+      if (!activeId) return;
+      // Drop any pending debounced save so it can't overwrite the restore.
+      saver.current.cancel(activeId);
+      const current = contents[activeId] ?? "";
+      if (current.length > 0) await forceSnapshot(activeId, current);
+      setContents((c) => ({ ...c, [activeId]: content }));
+      await savePadNow(activeId, content);
+    },
+    [activeId, contents],
+  );
+
   const setTheme = useCallback(
     (theme: ThemeMode) => {
       if (!index) return;
@@ -202,6 +240,8 @@ export function useWorkspace() {
     reorderPads,
     setFontSize,
     setTheme,
+    importPad,
+    restoreContent,
     flush,
   };
 }

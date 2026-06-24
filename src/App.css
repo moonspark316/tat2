@@ -416,3 +416,106 @@ body,
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- Revision browser ---- */
+.revbrowser {
+  width: 90%;
+  height: 80%;
+  display: flex;
+  background: var(--chrome);
+  border: 0.5px solid rgba(128, 128, 128, 0.3);
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.rev-list {
+  width: 38%;
+  min-width: 130px;
+  border-right: 0.5px solid rgba(128, 128, 128, 0.2);
+  overflow-y: auto;
+  background: var(--bg);
+}
+.rev-list-head {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.55;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+}
+.rev-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.rev-item.active {
+  background: rgba(128, 128, 128, 0.18);
+}
+.rev-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rev-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 0.5px solid rgba(128, 128, 128, 0.2);
+}
+.rev-actions {
+  display: flex;
+  gap: 6px;
+}
+.rev-actions button {
+  border: 0.5px solid rgba(128, 128, 128, 0.35);
+  background: var(--bg);
+  color: var(--ink);
+  border-radius: 7px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.rev-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.rev-body {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 10px;
+}
+.rev-pre {
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.rev-pre .diff-add {
+  background: rgba(70, 170, 90, 0.18);
+  color: var(--ink);
+}
+.rev-pre .diff-del {
+  background: rgba(200, 70, 70, 0.18);
+  color: var(--ink);
+}
+.rev-pre .diff-ctx {
+  opacity: 0.65;
+}
+.rev-hint {
+  padding: 6px 10px;
+  font-size: 11px;
+  opacity: 0.5;
+  border-top: 0.5px solid rgba(128, 128, 128, 0.2);
+}

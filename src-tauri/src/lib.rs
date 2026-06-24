@@ -132,6 +132,7 @@ pub fn run() {
         .manage(TrayAnchor::default())
         .manage(Pinned::default())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 // Remember the size the user picked, but let us anchor position.
@@ -146,6 +147,8 @@ pub fn run() {
             storage::list_revisions,
             storage::read_revision,
             storage::force_snapshot,
+            storage::export_pad,
+            storage::import_file,
             hide_popover,
             set_pinned,
             quit_app,
