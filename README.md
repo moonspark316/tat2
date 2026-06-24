@@ -60,7 +60,21 @@ until native CRDT sync lands.
 
 ---
 
-## Run it
+## Install
+
+Grab a prebuilt bundle from the
+[**latest release**](https://github.com/moonspark316/tat2/releases/latest):
+
+| OS | File | First-launch note |
+| --- | --- | --- |
+| macOS (Apple Silicon + Intel) | `Tat2_<ver>_universal.dmg` | Unsigned — right-click → **Open** (or `xattr -dr com.apple.quarantine /Applications/Tat2.app`) |
+| Linux (Debian/Ubuntu) | `Tat2_<ver>_amd64.deb` | `sudo dpkg -i Tat2_*.deb` |
+| Linux (Fedora/RHEL) | `Tat2-<ver>-1.x86_64.rpm` | `sudo rpm -i Tat2-*.rpm` |
+
+> Windows installers aren't published yet — the release CI is wired for them but
+> needs hosted-runner billing enabled. Build from source in the meantime.
+
+## Run from source
 
 Prerequisites: **Node 18+**, **pnpm**, **Rust 1.77+**, and the
 [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/) for your OS.
@@ -100,8 +114,10 @@ Tracked as GitHub epics & issues.
   Automerge CRDT model, offline queue, end-to-end-encrypted relay, device pairing
 - **Cross-platform polish** — Windows/Linux tray anchoring, HiDPI/multi-monitor
   *(needs testing on those OSes)*
-- **Release** — code signing/notarization, auto-update *(needs certs + keys)*;
-  CI builds unsigned bundles for all three OSes today
+- **Release** — `v1.0.0` ships unsigned **macOS** (universal) + **Linux**
+  (`.deb`/`.rpm`) bundles via tagged CI; **Windows** bundles + **code
+  signing/notarization** + **auto-update** are still open *(need hosted-runner
+  billing, certs, and keys)*
 
 ---
 
