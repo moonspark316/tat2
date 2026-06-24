@@ -1,4 +1,5 @@
-const IS_MAC = navigator.userAgent.includes("Mac");
+const IS_MAC =
+  typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
 const MODIFIER_CODES = new Set([
   "ShiftLeft",

@@ -34,6 +34,9 @@ jobs:
       - name: Frontend typecheck
         run: pnpm typecheck
 
+      - name: Unit tests
+        run: pnpm test
+
       - name: Rust format check
         run: |
           rustup component add rustfmt >/dev/null 2>&1 || true
