@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ColorName, Index, PadMeta } from "../types";
+import type { ColorName, Index, PadMeta, ThemeMode } from "../types";
 import { nextColor } from "../palette";
 import {
   AutoSaver,
@@ -173,6 +173,14 @@ export function useWorkspace() {
     [index, persistIndex],
   );
 
+  const setTheme = useCallback(
+    (theme: ThemeMode) => {
+      if (!index) return;
+      persistIndex({ ...index, settings: { ...index.settings, theme } });
+    },
+    [index, persistIndex],
+  );
+
   const flush = useCallback(() => saver.current.flushAll(), []);
 
   return {
@@ -193,6 +201,7 @@ export function useWorkspace() {
     recolorPad,
     reorderPads,
     setFontSize,
+    setTheme,
     flush,
   };
 }

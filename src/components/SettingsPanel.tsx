@@ -1,13 +1,17 @@
-import type { ColorName, PadMeta } from "../types";
+import type { ColorName, PadMeta, ThemeMode } from "../types";
 import { PALETTE } from "../palette";
+
+const THEMES: ThemeMode[] = ["system", "light", "dark"];
 
 interface SettingsProps {
   pad: PadMeta;
   fontSize: number;
+  theme: ThemeMode;
   canDelete: boolean;
   onRename: (t: string) => void;
   onRecolor: (c: ColorName) => void;
   onFontSize: (n: number) => void;
+  onTheme: (t: ThemeMode) => void;
   onDelete: () => void;
   onClose: () => void;
 }
@@ -15,10 +19,12 @@ interface SettingsProps {
 export function SettingsPanel({
   pad,
   fontSize,
+  theme,
   canDelete,
   onRename,
   onRecolor,
   onFontSize,
+  onTheme,
   onDelete,
   onClose,
 }: SettingsProps) {
@@ -44,6 +50,21 @@ export function SettingsPanel({
               onClick={() => onRecolor(s.name)}
               title={s.name}
             />
+          ))}
+        </div>
+      </div>
+
+      <div className="row">
+        <span>Theme</span>
+        <div className="segmented">
+          {THEMES.map((t) => (
+            <button
+              key={t}
+              className={theme === t ? "on" : ""}
+              onClick={() => onTheme(t)}
+            >
+              {t}
+            </button>
           ))}
         </div>
       </div>

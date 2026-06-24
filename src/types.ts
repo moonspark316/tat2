@@ -7,8 +7,10 @@ export interface PadMeta {
   updatedAt: number;
 }
 
+export type ThemeMode = "system" | "light" | "dark";
+
 export interface Settings {
-  theme?: string;
+  theme?: ThemeMode;
   fontSize?: number;
   globalShortcut?: string;
 }
