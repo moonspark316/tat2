@@ -6,6 +6,7 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref.
 concurrency:
@@ -13,22 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Runs on a self-hosted macOS runner so it doesn't consume GitHub-hosted
+  # Actions minutes. No cache/artifact actions here, to avoid any dependency on
+  # billed Actions services — the self-hosted machine persists its own caches.
   check:
-    name: Typecheck + cargo check (Linux)
-    runs-on: ubuntu-latest
+    name: Typecheck + cargo check
+    runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            librsvg2-dev \
-            libayatana-appindicator3-dev \
-            libxdo-dev \
-            build-essential curl wget file libssl-dev
 
       - uses: pnpm/action-setup@v4
         with:
@@ -37,15 +30,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
 
       - run: pnpm install --frozen-lockfile
 
@@ -58,13 +46,38 @@ jobs:
       - name: Rust check
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
-  build:
+  build-macos:
+    name: Build (macOS, self-hosted)
+    needs: check
+    runs-on: [self-hosted, macOS]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build app
+        run: pnpm tauri build
+
+  # Cross-platform bundles need GitHub-hosted runners. Enable by triggering this
+  # workflow manually (workflow_dispatch) once Actions billing is active.
+  build-cross:
     name: Build (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch'
     needs: check
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -105,6 +118,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tat2-${{ matrix.os }}
-          path: |
-            src-tauri/target/release/bundle/**/*
+          path: src-tauri/target/release/bundle/**/*
           if-no-files-found: ignore
