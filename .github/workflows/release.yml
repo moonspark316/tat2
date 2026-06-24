@@ -26,7 +26,10 @@ jobs:
             rustup-target: ""
           - label: Linux
             os: [self-hosted, obx2]
-            args: ""
+            # Only deb + rpm here: the AppImage bundler shells out to xdg-open,
+            # which isn't installed on the obx2 runner. Add `xdg-utils` to the
+            # runner to re-enable AppImage.
+            args: "--bundles deb,rpm"
             rustup-target: ""
     runs-on: ${{ matrix.os }}
     steps:
