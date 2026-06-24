@@ -1,0 +1,74 @@
+name: Release
+
+# Cut a GitHub Release with native bundles for every desktop OS when a v* tag
+# is pushed. macOS + Windows build on GitHub-hosted runners; Linux builds on the
+# self-hosted obx2 runner. tauri-action creates/updates the release and uploads
+# each platform's bundles to it.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Build & upload (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS (Universal)
+            os: macos-latest
+            args: "--target universal-apple-darwin"
+            rustup-target: "aarch64-apple-darwin,x86_64-apple-darwin"
+          - label: Windows
+            os: windows-latest
+            args: ""
+            rustup-target: ""
+          - label: Linux
+            os: [self-hosted, obx2]
+            args: ""
+            rustup-target: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Hosted runners need a Rust toolchain; the self-hosted obx2 box already
+      # has one (it runs `pnpm tauri build` in CI today).
+      - name: Install Rust (hosted runners)
+        if: matrix.os == 'macos-latest' || matrix.os == 'windows-latest'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustup-target }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build & upload to release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Working MVP (v1.0.0)"
+          releaseBody: |
+            First production-quality build of Tat2 — the always-there menu-bar
+            sketchpad with invisible, never-fail saves.
+
+            Download the bundle for your OS below. The builds are **unsigned**, so
+            first launch needs an extra step:
+            - **macOS:** right-click the app → Open (or `xattr -dr com.apple.quarantine /Applications/Tat2.app`)
+            - **Windows:** "More info" → "Run anyway" on the SmartScreen prompt
+
+            Tat2 has no dock/taskbar window — after launch, look for the icon in
+            your menu bar / system tray, or press the global shortcut
+            (`⌘⇧Space` on macOS, `Ctrl+Shift+Space` on Windows/Linux).
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

@@ -1,6 +1,6 @@
 [package]
 name = "tat2"
-version = "0.1.0"
+version = "1.0.0"
 description = "Tat2 — always-there quick sketchpads"
 authors = ["moonspark316"]
 edition = "2021"

@@ -52,7 +52,9 @@ jobs:
   # so per-push CI stays fast (check + tests).
   build-linux:
     name: Build (Linux, obx2)
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    # Release bundles are produced by release.yml on tags; this is a manual
+    # smoke-build only, so it doesn't contend with the release job on obx2.
+    if: github.event_name == 'workflow_dispatch'
     needs: check
     runs-on: [self-hosted, obx2]
     env:
