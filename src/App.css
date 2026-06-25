@@ -99,6 +99,33 @@ body,
   }
 }
 
+/* ---- Per-pad signature ----
+ * Each color places its neon glow in its own region with its own temperament,
+ * so switching pads genuinely changes the room — all still a whisper. */
+.app[data-color="amber"] {
+  --glow-warm: radial-gradient(46% 50% at 20% 40%, color-mix(in srgb, var(--dot) 13%, transparent), transparent 70%);
+}
+.app[data-color="orange"] {
+  --glow-warm: radial-gradient(50% 48% at 26% 82%, color-mix(in srgb, var(--dot) 13%, transparent), transparent 70%);
+}
+.app[data-color="red"] {
+  --glow-warm: radial-gradient(44% 46% at 16% 52%, color-mix(in srgb, var(--dot) 14%, transparent), transparent 68%);
+}
+.app[data-color="purple"] {
+  /* deep futuristic haze from the top + a low ink pool */
+  --glow-warm: radial-gradient(58% 52% at 50% 6%, color-mix(in srgb, var(--dot) 14%, transparent), transparent 72%);
+  --glow-cool: radial-gradient(46% 46% at 80% 92%, color-mix(in srgb, var(--ink) 9%, transparent), transparent 70%);
+}
+.app[data-color="blue"] {
+  --glow-warm: radial-gradient(50% 48% at 78% 24%, color-mix(in srgb, var(--dot) 12%, transparent), transparent 70%);
+}
+.app[data-color="teal"] {
+  --glow-warm: radial-gradient(48% 50% at 74% 78%, color-mix(in srgb, var(--dot) 12%, transparent), transparent 70%);
+}
+.app[data-color="green"] {
+  --glow-warm: radial-gradient(46% 48% at 24% 26%, color-mix(in srgb, var(--dot) 12%, transparent), transparent 70%);
+}
+
 /* ---- Top bar ---- */
 .topbar {
   display: flex;
@@ -155,7 +182,10 @@ body,
 }
 .dot.active {
   background: var(--this, var(--dot));
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+  /* soft neon halo in the pad's own color */
+  box-shadow:
+    0 0 0 3px rgba(0, 0, 0, 0.06),
+    0 0 9px 0 var(--this, var(--dot));
 }
 .dot.add {
   border-style: dashed;
@@ -218,12 +248,19 @@ body,
   font-weight: 500;
   letter-spacing: 0.01em;
   -webkit-font-smoothing: subpixel-antialiased;
+  /* The cursor is this pad's ink. */
+  caret-color: var(--dot);
   user-select: text;
   -webkit-user-select: text;
 }
 .editor::placeholder {
   color: color-mix(in srgb, var(--ink) 38%, transparent);
   font-weight: 500;
+}
+/* Selecting text glows in the pad's color. */
+.editor::selection,
+.markdown ::selection {
+  background: color-mix(in srgb, var(--dot) 26%, transparent);
 }
 
 /* ---- Status bar ---- */
