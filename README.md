@@ -112,6 +112,28 @@ bundles and clients simply find no update.
 > macOS notarization lands (the cert is still pending), macOS users get the same
 > unsigned-app first-launch step on each update as they do on a fresh install.
 
+### macOS signing & notarization
+
+Releases are unsigned until Tat2's **own** Apple Developer ID is configured —
+then Gatekeeper opens the app with no warning. The CI is already wired; it signs
++ notarizes automatically once these repo secrets are present (absent = unsigned
+build, no failure):
+
+| Secret | How to get it |
+| --- | --- |
+| `APPLE_CERTIFICATE` | base64 of a **Developer ID Application** cert exported as `.p12` (`base64 -i cert.p12 \| pbcopy`) |
+| `APPLE_CERTIFICATE_PASSWORD` | the password you set when exporting the `.p12` |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: <Your Name/Org> (TEAMID)` |
+| `APPLE_ID` | the Apple ID email of the account that owns the cert |
+| `APPLE_PASSWORD` | an [app-specific password](https://support.apple.com/en-us/102654) for notarization |
+| `APPLE_TEAM_ID` | your 10-char Apple Developer Team ID |
+
+Prereqs (one-time): an **Apple Developer Program** membership ($99/yr) under the
+project's account, then create a *Developer ID Application* certificate at
+[developer.apple.com](https://developer.apple.com/account/resources/certificates).
+This is the only Gatekeeper-clean path; an "Apple Development" cert can't notarize
+for distribution.
+
 ## Run from source
 
 Prerequisites: **Node 18+**, **pnpm**, **Rust 1.77+**, and the
