@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an idea for Tat2
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tat2 stays deliberately small and calm. Ideas that fit the soul —
+        instant access, invisible never-fail saves, organize-by-pad — are most
+        likely to land. (See the product rules in CONTRIBUTING.md.)
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem or need?
+      description: What are you trying to do that Tat2 makes hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: How might it work? UI sketches welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

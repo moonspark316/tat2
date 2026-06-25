@@ -14,15 +14,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Runs on the self-hosted obx2 runners (Linux) — no GitHub-hosted minutes.
   check:
-    name: Typecheck + cargo check
-    runs-on: [self-hosted, obx2]
-    # Shared cargo target across all obx2 runners → one cold compile, then fast.
-    env:
-      CARGO_TARGET_DIR: /home/ubuntu/cargo-target-tat2
+    name: Typecheck · tests · clippy · cargo check
+    # GitHub-hosted Ubuntu so external contributors' PRs run CI without any
+    # self-hosted infrastructure. ubuntu-latest is 24.04, which ships WebKitGTK
+    # 4.1 (the version Tauri v2 links against).
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Tauri v2's Rust crates link against WebKitGTK 4.1 + GTK at build/check
+      # time. ubuntu-latest doesn't have these preinstalled, so install them.
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
 
       - uses: pnpm/action-setup@v4
         with:
@@ -31,6 +46,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - run: pnpm install --frozen-lockfile
 
@@ -41,53 +65,35 @@ jobs:
         run: pnpm test
 
       - name: Rust format check
-        run: |
-          rustup component add rustfmt >/dev/null 2>&1 || true
-          cargo fmt --manifest-path src-tauri/Cargo.toml --check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: Clippy (warnings = errors)
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
       - name: Rust check
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
-  # Full release build is heavy (2-core box) — only on tags or manual trigger,
-  # so per-push CI stays fast (check + tests).
-  build-linux:
-    name: Build (Linux, obx2)
-    # Release bundles are produced by release.yml on tags; this is a manual
-    # smoke-build only, so it doesn't contend with the release job on obx2.
-    if: github.event_name == 'workflow_dispatch'
-    needs: check
-    runs-on: [self-hosted, obx2]
-    env:
-      CARGO_TARGET_DIR: /home/ubuntu/cargo-target-tat2
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Build app (.deb + AppImage)
-        run: pnpm tauri build
-
-  # macOS/Windows bundles need GitHub-hosted runners. Trigger manually
-  # (workflow_dispatch) once Actions billing is enabled.
-  build-hosted:
-    name: Build (${{ matrix.os }})
+  # Optional cross-OS smoke build, on demand (release bundles live in release.yml).
+  build:
+    name: Smoke build (${{ matrix.os }})
     if: github.event_name == 'workflow_dispatch'
     needs: check
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -100,11 +106,4 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
-      - name: Build app
-        run: pnpm tauri build
-      - name: Upload bundles
-        uses: actions/upload-artifact@v4
-        with:
-          name: tat2-${{ matrix.os }}
-          path: src-tauri/target/release/bundle/**/*
-          if-no-files-found: ignore
+      - run: pnpm tauri build

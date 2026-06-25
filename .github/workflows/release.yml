@@ -1,19 +1,15 @@
 name: Release
 
-# Cut a GitHub Release with native bundles for every desktop OS when a v* tag
-# is pushed. macOS + Windows build on GitHub-hosted runners; Linux builds on the
-# self-hosted obx2 runner. tauri-action creates/updates the release and uploads
-# each platform's bundles to it.
+# On a v* tag, build native bundles for every desktop OS on GitHub-hosted
+# runners (free for public repos) and upload them to the GitHub Release.
+# Tag-only: dispatching from a branch would publish a release named after it.
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 jobs:
   release:
     name: Build & upload (${{ matrix.label }})
-    # tauri-action needs write access to create/attach release assets; the
-    # default GITHUB_TOKEN is read-only on this repo.
     permissions:
       contents: write
     strategy:
@@ -29,21 +25,30 @@ jobs:
             args: ""
             rustup-target: ""
           - label: Linux
-            os: [self-hosted, obx2]
-            # Only deb + rpm here: the AppImage bundler shells out to xdg-open,
-            # which isn't installed on the obx2 runner. Add `xdg-utils` to the
-            # runner to re-enable AppImage.
-            args: "--bundles deb,rpm"
+            # Pinned to 22.04: ubuntu-latest (24.04) lacks libfuse2, which the
+            # AppImage bundler needs — it would build deb/rpm then die on AppImage.
+            os: ubuntu-22.04
+            args: ""
             rustup-target: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      # Self-hosted runners persist ~/setup-pnpm between jobs, which makes
-      # pnpm/action-setup fail with ENOTEMPTY when it recreates the dir.
-      - name: Clear stale pnpm setup dir (self-hosted)
-        if: ${{ runner.environment == 'self-hosted' }}
-        run: rm -rf ~/setup-pnpm
+      - name: Install Tauri system dependencies (Linux)
+        if: matrix.label == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
       - uses: pnpm/action-setup@v4
         with:
@@ -52,14 +57,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
 
-      # Hosted runners need a Rust toolchain; the self-hosted obx2 box already
-      # has one (it runs `pnpm tauri build` in CI today).
-      - name: Install Rust (hosted runners)
-        if: matrix.os == 'macos-latest' || matrix.os == 'windows-latest'
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rustup-target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - run: pnpm install --frozen-lockfile
 
@@ -76,19 +82,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Working MVP (v1.0.0)"
-          releaseBody: |
-            First production-quality build of Tat2 — the always-there menu-bar
-            sketchpad with invisible, never-fail saves.
-
-            Download the bundle for your OS below. The builds are **unsigned**, so
-            first launch needs an extra step:
-            - **macOS:** right-click the app → Open (or `xattr -dr com.apple.quarantine /Applications/Tat2.app`)
-            - **Windows:** "More info" → "Run anyway" on the SmartScreen prompt
-
-            Tat2 has no dock/taskbar window — after launch, look for the icon in
-            your menu bar / system tray, or press the global shortcut
-            (`⌘⇧Space` on macOS, `Ctrl+Shift+Space` on Windows/Linux).
+          releaseName: ${{ github.ref_name }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

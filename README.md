@@ -2,6 +2,11 @@
 
 **Always-there quick sketchpads that just never lose your text.**
 
+[![CI](https://github.com/moonspark316/tat2/actions/workflows/ci.yml/badge.svg)](https://github.com/moonspark316/tat2/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/moonspark316/tat2)](https://github.com/moonspark316/tat2/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%20v2-24C8DB)](https://v2.tauri.app/)
+
 Tat2 lives in your menu bar / system tray. Hit a global shortcut, a small
 colorful pad drops down, you type, you click away. It saves itself — invisibly,
 atomically, with full revision history. No "Saving…", no "Saved", no Save button.
@@ -150,6 +155,18 @@ Tracked as GitHub epics & issues.
   (`.deb`/`.rpm`) bundles via tagged CI, with a quiet signed **auto-update**
   feed (`latest.json`); **Windows** bundles + macOS **code
   signing/notarization** are still open *(need hosted-runner billing and certs)*
+
+---
+
+## Contributing
+
+Contributions are welcome! Start with **[CONTRIBUTING.md](CONTRIBUTING.md)** for
+setup and the checks CI runs, and **[ARCHITECTURE.md](ARCHITECTURE.md)** for how
+the Rust core, Tauri bridge, and React frontend fit together. Please be kind —
+see the [Code of Conduct](CODE_OF_CONDUCT.md). Found a security issue? See
+[SECURITY.md](SECURITY.md).
+
+Good first stops: issues labelled **good-first-issue**, and the roadmap above.
 
 ---
 
