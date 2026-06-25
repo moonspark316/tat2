@@ -6,35 +6,30 @@
   --radius: 14px;
 
   /* ---- Paper surface ----
-   * The editor is a sheet of notebook paper, not a screen: a gentle
-   * low-contrast gradient (paper catching window light) + a faint dot grid.
-   * Both derive from the active pad's tokens (--bg / --ink), so the texture
-   * is warm on amber, cool on blue, light on dark — and always a whisper.
-   * Tuning knobs: the mix %s below (smaller = subtler) and the dot size. */
-  --paper-hi: color-mix(in srgb, var(--bg) 92%, #fff);
-  --paper-lo: color-mix(in srgb, var(--bg) 95.5%, #000);
+   * Not a pattern — a calm sheet with one slow, soft, drifting glow of the
+   * pad's color, so the page feels gently alive without ever distracting from
+   * the text. Everything derives from the active pad tokens (--bg / --dot /
+   * --ink); the motion is ~30s and low-contrast = non-invasive.
+   * Tuning knobs: the mix %s (smaller = subtler) and the animation duration. */
+  --paper-hi: color-mix(in srgb, var(--bg) 94%, #fff);
+  --paper-lo: color-mix(in srgb, var(--bg) 96%, #000);
   --paper-grad: radial-gradient(
     135% 120% at 50% -10%,
     var(--paper-hi) 0%,
-    var(--bg) 55%,
+    var(--bg) 60%,
     var(--paper-lo) 100%
   );
-  --paper-dots: radial-gradient(
-    color-mix(in srgb, var(--ink) 14%, transparent) 1px,
-    transparent 1.7px
+  /* Two oversized, soft color pools that slowly drift across the sheet. */
+  --glow-warm: radial-gradient(
+    45% 45% at 30% 30%,
+    color-mix(in srgb, var(--dot) 12%, transparent),
+    transparent 70%
   );
-  /* Page lit by a window: a warm pool of the pad's accent in the top-left,
-     a cool depth of the ink tone in the bottom-right. Kept to a whisper. */
-  --paper-glow: radial-gradient(
-      60% 55% at 6% -2%,
-      color-mix(in srgb, var(--dot) 9%, transparent),
-      transparent 62%
-    ),
-    radial-gradient(
-      55% 50% at 100% 102%,
-      color-mix(in srgb, var(--ink) 6%, transparent),
-      transparent 60%
-    );
+  --glow-cool: radial-gradient(
+    42% 42% at 72% 72%,
+    color-mix(in srgb, var(--ink) 6%, transparent),
+    transparent 70%
+  );
 
   font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
@@ -63,25 +58,45 @@ body,
 .boot {
   height: 100%;
   background-color: var(--bg);
-  background-image: var(--paper-dots), var(--paper-glow), var(--paper-grad);
-  background-size: 22px 22px, cover, cover;
+  background-image: var(--glow-warm), var(--glow-cool), var(--paper-grad);
+  background-size: 170% 170%, 165% 165%, cover;
+  background-position: 0% 0%, 100% 100%, center;
   border-radius: var(--radius);
+  animation: paper-drift 32s ease-in-out infinite alternate;
 }
 
 .app {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  /* Paper: gentle gradient + a faint pad-colored dot grid. The chrome rails
-     (top/status bars) paint opaque on top, so texture shows only on the sheet. */
+  /* Real warm paper + one slow, faint neon glow of the pad's color drifting
+     behind it. No pattern. The chrome rails paint opaque on top, so the glow
+     lives only on the writing surface. */
   background-color: var(--bg);
-  background-image: var(--paper-dots), var(--paper-glow), var(--paper-grad);
-  background-size: 22px 22px, cover, cover;
-  background-position: center, center;
+  background-image: var(--glow-warm), var(--glow-cool), var(--paper-grad);
+  background-size: 170% 170%, 165% 165%, cover;
+  background-position: 0% 0%, 100% 100%, center;
+  animation: paper-drift 32s ease-in-out infinite alternate;
   border-radius: var(--radius);
   overflow: hidden;
   border: 0.5px solid rgba(0, 0, 0, 0.12);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+/* Slow, non-invasive: the two glow pools drift a few % over half a minute. */
+@keyframes paper-drift {
+  from {
+    background-position: 0% 0%, 100% 100%, center;
+  }
+  to {
+    background-position: 26% 18%, 74% 82%, center;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app,
+  .boot {
+    animation: none;
+  }
 }
 
 /* ---- Top bar ---- */
@@ -199,11 +214,16 @@ body,
   line-height: 1.5;
   font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
     monospace;
+  /* Typewriter ink on paper: the text always comes out strong. */
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: subpixel-antialiased;
   user-select: text;
   -webkit-user-select: text;
 }
 .editor::placeholder {
-  color: color-mix(in srgb, var(--ink) 35%, transparent);
+  color: color-mix(in srgb, var(--ink) 38%, transparent);
+  font-weight: 500;
 }
 
 /* ---- Status bar ---- */
@@ -587,6 +607,7 @@ body,
   padding: 16px 18px;
   line-height: 1.6;
   color: var(--ink);
+  font-weight: 500;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -707,7 +728,7 @@ body,
 @media (prefers-reduced-motion: no-preference) {
   .search::before,
   .revbrowser::before {
-    animation: tat-spin 7s linear infinite;
+    animation: tat-spin 14s linear infinite;
   }
 }
 @keyframes tat-spin {
