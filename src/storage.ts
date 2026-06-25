@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Index, PadMeta, TrashEntry, RestoredPad, Workspace } from "./types";
+import type {
+  Index,
+  PadMeta,
+  TrashEntry,
+  RestoredPad,
+  Workspace,
+  WorkspaceLocation,
+} from "./types";
 
 // ---- Thin wrappers over the Rust storage commands ----
 
@@ -11,6 +18,19 @@ export const saveIndex = (index: Index): Promise<void> =>
 
 export const savePadNow = (id: string, content: string): Promise<void> =>
   invoke("save_pad", { id, content });
+
+/**
+ * Persist a pad as an Automerge doc + its `.md` mirror (the primary editor
+ * save path since #16). `doc` is the Automerge binary; `content` is its text.
+ * Rust writes the `.md` FIRST so the human-recoverable copy is never at risk.
+ */
+export const savePadDocNow = (
+  id: string,
+  doc: Uint8Array,
+  content: string,
+): Promise<void> =>
+  // Tauri serializes a typed array to a JSON number array for the `Vec<u8>` arg.
+  invoke("save_pad_doc", { id, doc: Array.from(doc), content });
 
 export const trashPad = (meta: PadMeta): Promise<void> =>
   invoke("trash_pad", { meta });
@@ -38,6 +58,19 @@ export const exportPad = (id: string, dest: string): Promise<void> =>
 export const importFile = (path: string): Promise<string> =>
   invoke("import_file", { path });
 
+// ---- Synced-folder stop-gap: workspace location (#20) ----
+
+export const getWorkspaceLocation = (): Promise<WorkspaceLocation> =>
+  invoke("get_workspace_location");
+
+/** Move the workspace to `newRoot` (copy → switch → cleanup; never loses data). */
+export const setWorkspaceRoot = (
+  newRoot: string,
+): Promise<WorkspaceLocation> => invoke("set_workspace_root", { newRoot });
+
+export const clearWorkspaceRoot = (): Promise<WorkspaceLocation> =>
+  invoke("clear_workspace_root");
+
 // ---- Window controls ----
 
 export const hidePopover = (): Promise<void> => invoke("hide_popover");
@@ -51,6 +84,12 @@ export const setShortcut = (accelerator: string): Promise<void> =>
 
 export const quitApp = (): Promise<void> => invoke("quit_app");
 
+/** How a pad's latest text is actually persisted. Injectable so the CRDT doc
+ *  store (since #16) can fold each save into an Automerge change before writing
+ *  both the `.automerge` binary and its `.md` mirror. Defaults to the plain
+ *  `.md`-only path. */
+export type PersistFn = (id: string, content: string) => Promise<void>;
+
 /**
  * Invisible autosave engine.
  *
@@ -61,12 +100,14 @@ export const quitApp = (): Promise<void> => invoke("quit_app");
 export class AutoSaver {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private pending = new Map<string, string>();
-  /** Writes that have started (savePadNow in progress) — awaitable via idle(). */
+  /** Writes that have started (persist in progress) — awaitable via idle(). */
   private inflight = new Map<string, Promise<void>>();
   private delay: number;
+  private persist: PersistFn;
 
-  constructor(delayMs = 400) {
+  constructor(delayMs = 400, persist: PersistFn = savePadNow) {
     this.delay = delayMs;
+    this.persist = persist;
   }
 
   /** Queue a debounced save for a pad. */
@@ -82,6 +123,23 @@ export class AutoSaver {
     );
   }
 
+  /** Append `task` to a pad's serialized write chain so it never overlaps or
+   *  races another write to the same `<id>.md`/`.automerge`. The returned promise
+   *  resolves when `task` (after any prior write) has finished. */
+  private chain(id: string, task: () => Promise<void>): Promise<void> {
+    const prior = this.inflight.get(id);
+    const run = (async () => {
+      // Preserve write ordering: never start before the previous write finishes.
+      if (prior) await prior.catch(() => {});
+      await task();
+    })();
+    this.inflight.set(id, run);
+    void run.finally(() => {
+      if (this.inflight.get(id) === run) this.inflight.delete(id);
+    });
+    return run;
+  }
+
   private flushOne(id: string): Promise<void> {
     const timer = this.timers.get(id);
     if (timer) clearTimeout(timer);
@@ -91,23 +149,25 @@ export class AutoSaver {
     if (content === undefined) return this.inflight.get(id) ?? Promise.resolve();
     this.pending.delete(id);
 
-    const prior = this.inflight.get(id);
-    const run = (async () => {
-      // Preserve write ordering: never start before the previous write finishes.
-      if (prior) await prior.catch(() => {});
+    return this.chain(id, async () => {
       try {
-        await savePadNow(id, content);
+        await this.persist(id, content);
       } catch (err) {
         // Never fail loudly: requeue and try again shortly.
         console.error("autosave retry", err);
         this.queue(id, content);
       }
-    })();
-    this.inflight.set(id, run);
-    void run.finally(() => {
-      if (this.inflight.get(id) === run) this.inflight.delete(id);
     });
-    return run;
+  }
+
+  /**
+   * Run a one-off persist for a pad on the SAME per-id serialized chain the
+   * debounced saves use, so a migration / seed write can't race a fast first
+   * keystroke's write to the same `<id>` files. Stays invisible: failures throw
+   * to the caller rather than surfacing any save indicator.
+   */
+  enqueue(id: string, task: () => Promise<void>): Promise<void> {
+    return this.chain(id, task);
   }
 
   /** Drop any QUEUED (not-yet-started) write for a pad. Does not abort an

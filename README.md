@@ -138,8 +138,12 @@ system tray**, or press the global shortcut:
 
 Tracked as GitHub epics & issues.
 
-- **Sync** *(designed — see [docs/SYNC_DESIGN.md](docs/SYNC_DESIGN.md))* —
-  Automerge CRDT model, offline queue, end-to-end-encrypted relay, device pairing
+- **Sync** *(partly built — see [docs/SYNC_DESIGN.md](docs/SYNC_DESIGN.md))* —
+  the offline-verifiable core has landed: each pad is now an **Automerge CRDT**
+  (`pads/<id>.automerge` alongside the `.md` mirror) with a seeded, reproducible
+  conflict-free merge test suite, plus a configurable workspace root so the data
+  folder can live in iCloud/Dropbox/Syncthing as a stop-gap. Still open: the
+  offline queue, end-to-end-encrypted relay, and device pairing.
 - **Cross-platform polish** — Windows/Linux tray anchoring, HiDPI/multi-monitor
   *(needs testing on those OSes)*
 - **Release** — `v1.0.0` ships unsigned **macOS** (universal) + **Linux**

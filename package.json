@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@automerge/automerge": "^3",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-autostart": "^2",
     "@tauri-apps/plugin-dialog": "^2",
@@ -29,6 +30,7 @@
     "@vitejs/plugin-react": "^4.6.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
+    "vite-plugin-wasm": "^3.6.0",
     "vitest": "^3.0.5"
   }
 }

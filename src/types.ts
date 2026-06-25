@@ -25,6 +25,13 @@ export interface Index {
 export interface Workspace {
   index: Index;
   contents: Record<string, string>;
+  /**
+   * padId -> Automerge `.automerge` binary as a byte array, when one exists on
+   * disk. Pads missing here predate the CRDT migration (#16) and are seeded
+   * from their `.md` text by the frontend. (Rust serializes `Vec<u8>` as a JSON
+   * number array.)
+   */
+  docs: Record<string, number[]>;
 }
 
 export interface TrashEntry {
@@ -35,6 +42,15 @@ export interface TrashEntry {
 export interface RestoredPad {
   meta: PadMeta;
   content: string;
+  /** The pad's Automerge binary, if it had one (restores full merge history). */
+  doc: number[] | null;
+}
+
+/** Where the workspace lives on disk; used by the synced-folder stop-gap (#20). */
+export interface WorkspaceLocation {
+  path: string;
+  isDefault: boolean;
+  defaultPath: string;
 }
 
 /**

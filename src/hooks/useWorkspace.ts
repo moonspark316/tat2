@@ -7,9 +7,10 @@ import {
   loadWorkspace,
   restorePad,
   saveIndex,
-  savePadNow,
+  savePadDocNow,
   trashPad,
 } from "../storage";
+import { PadDocStore } from "../automerge/store";
 
 /** Collision-proof pad id (timestamp + random suffix). */
 function newPadId(): string {
@@ -23,15 +24,41 @@ function newPadId(): string {
 export function useWorkspace() {
   const [index, setIndex] = useState<Index | null>(null);
   const [contents, setContents] = useState<Record<string, string>>({});
-  const saver = useRef(new AutoSaver(400));
+  // The CRDT doc store owns each pad's Automerge document; the autosaver folds
+  // every save into a change and persists the binary + `.md` mirror via it.
+  const store = useRef(new PadDocStore());
+  const saver = useRef(new AutoSaver(400, store.current.persistFn));
   const loaded = useRef(false);
 
   useEffect(() => {
     if (loaded.current) return;
     loaded.current = true;
     loadWorkspace().then((ws) => {
+      // Hydrate the CRDT docs (loading existing `.automerge` binaries, seeding
+      // fresh docs from `.md` for pads that predate the migration).
+      const migrated = store.current.hydrate(ws);
       setIndex(ws.index);
-      setContents(ws.contents);
+      // Use the docs' canonical text so the editor and CRDT never diverge.
+      const text: Record<string, string> = {};
+      for (const pad of ws.index.pads) {
+        text[pad.id] = store.current.has(pad.id)
+          ? store.current.text(pad.id)
+          : (ws.contents[pad.id] ?? "");
+      }
+      setContents(text);
+      // Make the migration durable: persist each freshly-seeded/healed pad's
+      // binary once. Route it through the AutoSaver's per-id serialized chain
+      // (not a bare `savePadDocNow`) so a very fast first keystroke's write to
+      // the same `<id>.md`/`.automerge` is strictly ordered after the migration
+      // write and can't race it on the temp files. The `.md` is rewritten with
+      // identical text (atomic, lossless); persistence stays invisible.
+      for (const id of migrated) {
+        void saver.current
+          .enqueue(id, () => store.current.persistFn(id, store.current.text(id)))
+          // Never fail loudly: the `.md` source of truth is already on disk, so
+          // a failed binary re-persist just retries on the next edit/launch.
+          .catch((err) => console.error("migration persist", err));
+      }
     });
   }, []);
 
@@ -110,7 +137,9 @@ export function useWorkspace() {
       updatedAt: now,
     };
     setContents((c) => ({ ...c, [id]: "" }));
-    void savePadNow(id, "");
+    store.current.ensure(id, "");
+    const bytes = store.current.bytes(id);
+    if (bytes) void savePadDocNow(id, bytes, "");
     persistIndex({ ...index, pads: [...index.pads, pad], activePadId: id });
   }, [index, persistIndex]);
 
@@ -125,12 +154,15 @@ export function useWorkspace() {
       saver.current.cancel(id);
       await saver.current.idle(id); // let any in-flight save finish first
       try {
-        await savePadNow(id, contents[id] ?? "");
+        // Persist the latest content into the CRDT + `.md` so the trashed copy
+        // (both files) is complete, then move it to trash.
+        await store.current.persistFn(id, contents[id] ?? "");
         await trashPad(meta); // soft-delete: recoverable from Trash
       } catch (err) {
         console.error("trash failed; keeping pad", err);
         return;
       }
+      store.current.forget(id);
       const remaining = index.pads.filter((p) => p.id !== id);
       const nextActive = activeId === id ? (remaining[0]?.id ?? null) : activeId;
       setContents((c) => {
@@ -147,7 +179,11 @@ export function useWorkspace() {
     async (id: string) => {
       if (!index) return;
       if (index.pads.some((p) => p.id === id)) return;
-      const { meta, content } = await restorePad(id);
+      const { meta, content, doc } = await restorePad(id);
+      // Re-adopt the pad's CRDT: prefer its restored binary (full history),
+      // else seed a fresh doc from the recovered `.md` text.
+      if (doc && doc.length > 0) store.current.adoptBytes(id, doc);
+      else store.current.ensure(id, content);
       const restored: PadMeta = { ...meta, order: index.pads.length };
       setContents((c) => ({ ...c, [id]: content }));
       persistIndex({
@@ -226,7 +262,9 @@ export function useWorkspace() {
         updatedAt: now,
       };
       setContents((c) => ({ ...c, [id]: content }));
-      void savePadNow(id, content);
+      store.current.ensure(id, content);
+      const bytes = store.current.bytes(id);
+      if (bytes) void savePadDocNow(id, bytes, store.current.text(id));
       persistIndex({ ...index, pads: [...index.pads, pad], activePadId: id });
     },
     [index, persistIndex],
@@ -244,7 +282,8 @@ export function useWorkspace() {
       const current = contents[activeId] ?? "";
       if (current.length > 0) await forceSnapshot(activeId, current);
       setContents((c) => ({ ...c, [activeId]: content }));
-      await savePadNow(activeId, content);
+      // Apply the restore as a CRDT change so history + sync stay coherent.
+      await store.current.persistFn(activeId, content);
     },
     [activeId, contents],
   );
