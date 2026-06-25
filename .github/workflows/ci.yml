@@ -16,12 +16,20 @@ concurrency:
 jobs:
   check:
     name: Typecheck · tests · clippy · cargo check
-    runs-on: ubuntu-latest
+    # Runs on the project's self-hosted obx2 runners. GitHub-hosted runners are
+    # currently blocked at the account/billing level, so a hosted job never gets
+    # scheduled — it dies in ~2s before any step. The obx2 box already has the
+    # Tauri WebKitGTK/GTK system libraries and a stable Rust toolchain installed.
+    # Flip back to `ubuntu-latest` once hosted Actions billing is restored.
+    runs-on: [self-hosted, obx2]
     steps:
       - uses: actions/checkout@v4
 
-      # Tauri's Linux build/check needs the WebKitGTK + GTK dev libraries.
+      # Tauri's Linux build/check needs the WebKitGTK + GTK dev libraries. These
+      # are pre-installed on the obx2 runner; `apt-get install` is a fast no-op
+      # there. Only run it on GitHub-hosted runners to avoid needing sudo/apt.
       - name: Install Tauri system dependencies
+        if: ${{ runner.environment == 'github-hosted' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y \
