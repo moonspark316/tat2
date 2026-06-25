@@ -16,29 +16,28 @@ concurrency:
 jobs:
   check:
     name: Typecheck · tests · clippy · cargo check
-    # Runs on the project's self-hosted obx2 runners. GitHub-hosted runners are
-    # currently blocked at the account/billing level, so a hosted job never gets
-    # scheduled — it dies in ~2s before any step. The obx2 box already has the
-    # Tauri WebKitGTK/GTK system libraries and a stable Rust toolchain installed.
-    # Flip back to `ubuntu-latest` once hosted Actions billing is restored.
-    runs-on: [self-hosted, obx2]
+    # GitHub-hosted Ubuntu so external contributors' PRs run CI without any
+    # self-hosted infrastructure. ubuntu-latest is 24.04, which ships WebKitGTK
+    # 4.1 (the version Tauri v2 links against).
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Tauri's Linux build/check needs the WebKitGTK + GTK dev libraries. These
-      # are pre-installed on the obx2 runner; `apt-get install` is a fast no-op
-      # there. Only run it on GitHub-hosted runners to avoid needing sudo/apt.
+      # Tauri v2's Rust crates link against WebKitGTK 4.1 + GTK at build/check
+      # time. ubuntu-latest doesn't have these preinstalled, so install them.
       - name: Install Tauri system dependencies
-        if: ${{ runner.environment == 'github-hosted' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
             libxdo-dev \
-            patchelf
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
 
       - uses: pnpm/action-setup@v4
         with:
@@ -92,8 +91,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libxdo-dev patchelf
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - uses: pnpm/action-setup@v4
         with:
