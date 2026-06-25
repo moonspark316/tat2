@@ -156,7 +156,34 @@ fn ensure_dir(p: &Path) -> Result<(), String> {
     fs::create_dir_all(p).map_err(|e| format!("mkdir {}: {e}", p.display()))
 }
 
-/// Atomic write: write to a sibling temp file, fsync, then rename over target.
+/// Fsync the directory that contains `path` so a just-completed `rename` is
+/// itself durable. Without this, a crash/power-loss after `fs::rename` returns
+/// can still lose the rename (the directory entry was only in the page cache),
+/// reverting the file to its previous contents — the #50 data-loss window.
+///
+/// Best-effort by design: some platforms / filesystems don't support opening a
+/// directory for fsync (notably Windows, where directory handles can't be
+/// flushed this way). On those we silently skip rather than failing the write —
+/// the file bytes were already fsynced before the rename, so the worst case is
+/// the durability window we're narrowing here, not a lost or corrupt file.
+fn fsync_parent_dir(path: &Path) {
+    let Some(parent) = path.parent() else { return };
+    // An empty parent ("") means the current directory; normalise it so the
+    // open targets a real path.
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    if let Ok(dir) = fs::File::open(parent) {
+        // Ignore the result: on filesystems/platforms where dir-fsync is
+        // unsupported this returns an error we deliberately tolerate.
+        let _ = dir.sync_all();
+    }
+}
+
+/// Atomic write: write to a sibling temp file, fsync, rename over target, then
+/// fsync the parent directory so the rename itself survives power loss (#50).
 fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         ensure_dir(parent)?;
@@ -172,11 +199,12 @@ fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
         f.sync_all().map_err(|e| format!("fsync tmp: {e}"))?;
     }
     fs::rename(&tmp, path).map_err(|e| format!("rename tmp->target: {e}"))?;
+    fsync_parent_dir(path);
     Ok(())
 }
 
-/// Atomic binary write: same temp→fsync→rename guarantee as [`atomic_write`],
-/// for the opaque Automerge `.automerge` blobs.
+/// Atomic binary write: same temp→fsync→rename→dir-fsync guarantee as
+/// [`atomic_write`], for the opaque Automerge `.automerge` blobs.
 fn atomic_write_bytes(path: &Path, data: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         ensure_dir(parent)?;
@@ -191,6 +219,7 @@ fn atomic_write_bytes(path: &Path, data: &[u8]) -> Result<(), String> {
         f.sync_all().map_err(|e| format!("fsync tmp: {e}"))?;
     }
     fs::rename(&tmp, path).map_err(|e| format!("rename tmp->target: {e}"))?;
+    fsync_parent_dir(path);
     Ok(())
 }
 
@@ -232,12 +261,32 @@ pub fn saved_shortcut(app: &AppHandle) -> String {
         .unwrap_or_else(default_shortcut)
 }
 
-fn read_index(app: &AppHandle) -> Result<Index, String> {
-    let path = workspace_dir(app)?.join("index.json");
+/// Read the workspace index from `root`, distinguishing two cases that
+/// previously collapsed into "present a fresh empty workspace" (#57 data-loss):
+///
+/// - Genuinely **absent** (`NotFound`) -> first run, so a fresh default index is
+///   the correct, expected result.
+/// - **Present but unreadable/unparseable** (permissions, a transient I/O error,
+///   a truncated/corrupt write, an unmounted synced drive surfacing the dir but
+///   not the file) -> return `Err`. Silently substituting an empty workspace
+///   here would hide the user's real pads and, worse, the next `save_index`
+///   would persist that empty index over the only copy of their data. Surfacing
+///   the error keeps the real `index.json` (and every `pads/<id>.md`) untouched
+///   on disk for recovery.
+///
+/// Path-based (no `AppHandle`) so the absent-vs-corrupt distinction is
+/// unit-testable; [`read_index`] is the thin Tauri shell over it.
+fn read_index_in(root: &Path) -> Result<Index, String> {
+    let path = root.join("index.json");
     match fs::read_to_string(&path) {
         Ok(s) => serde_json::from_str(&s).map_err(|e| format!("parse index.json: {e}")),
-        Err(_) => Ok(default_index()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(default_index()),
+        Err(e) => Err(format!("read index.json: {e}")),
     }
+}
+
+fn read_index(app: &AppHandle) -> Result<Index, String> {
+    read_index_in(&workspace_dir(app)?)
 }
 
 fn write_index(app: &AppHandle, index: &Index) -> Result<(), String> {
@@ -611,11 +660,23 @@ pub fn read_revision(app: AppHandle, id: String, ts: u64) -> Result<String, Stri
     fs::read_to_string(&path).map_err(|e| format!("read revision: {e}"))
 }
 
+/// Path-based core of [`export_pad`] so the no-clobber-on-read-error guarantee
+/// (#56) is unit-testable. `src` is the pad's `.md`; `dest` is where to export.
+/// The source read is fallible and propagated: if the pad's `.md` can't be read
+/// (missing/permissions/I/O error) we must NOT fall back to empty and overwrite
+/// the user's chosen destination with a blank file. On a read error the
+/// destination is left exactly as it was — an existing file the user picked is
+/// never clobbered with nothing.
+fn export_pad_from(src: &Path, dest: &Path) -> Result<(), String> {
+    let content =
+        fs::read_to_string(src).map_err(|e| format!("read pad {}: {e}", src.display()))?;
+    atomic_write(dest, &content)
+}
+
 /// Write a pad's current content to an arbitrary destination path (export).
 #[tauri::command]
 pub fn export_pad(app: AppHandle, id: String, dest: String) -> Result<(), String> {
-    let content = read_pad(&app, &id);
-    atomic_write(Path::new(&dest), &content)
+    export_pad_from(&pad_path(&app, &id)?, Path::new(&dest))
 }
 
 /// Read an external file's text (import). Returns its contents.
@@ -1136,5 +1197,147 @@ mod tests {
             fs::read_to_string(root.join("pads").join("p.md")).unwrap(),
             "live"
         );
+    }
+
+    // --- #50: parent-dir fsync after rename --------------------------------
+
+    #[test]
+    fn atomic_write_fsyncs_parent_and_lands_file() {
+        // We can't observe an fsync directly in a unit test, but we CAN assert
+        // the write path (which now fsyncs the parent dir after rename) succeeds
+        // and lands the file with no leftover temp, on a freshly-created nested
+        // directory whose parent had to be created — i.e. the dir handle that
+        // fsync_parent_dir opens is valid and the extra durability step never
+        // breaks or fails the write (#50).
+        let tmp = TmpDir::new("fsync-parent");
+        let target = tmp.path().join("deep").join("nest").join("pad.md");
+        atomic_write(&target, "durable").unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "durable");
+        let leftovers: Vec<_> = fs::read_dir(target.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file should be renamed away");
+    }
+
+    #[test]
+    fn fsync_parent_dir_tolerates_missing_and_root_paths() {
+        // Must never panic / fail: a path whose parent doesn't exist, and a bare
+        // filename (empty parent -> current dir). Both are tolerated silently.
+        fsync_parent_dir(Path::new("/this/does/not/exist/at/all/file.md"));
+        fsync_parent_dir(Path::new("bare-name.md"));
+    }
+
+    // --- #56: export_pad must not clobber the destination on read error ------
+
+    #[test]
+    fn export_writes_pad_content_to_destination() {
+        let tmp = TmpDir::new("export-ok");
+        let src = tmp.path().join("pads").join("p.md");
+        atomic_write(&src, "exported words").unwrap();
+        let dest = tmp.path().join("out").join("export.md");
+
+        export_pad_from(&src, &dest).unwrap();
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "exported words");
+    }
+
+    #[test]
+    fn export_leaves_existing_destination_untouched_when_source_unreadable() {
+        // The #56 bug: an unreadable source used to read as "" and overwrite the
+        // chosen destination with an empty file. Now the read error propagates
+        // and the destination the user picked keeps its prior contents.
+        let tmp = TmpDir::new("export-noclobber");
+        let missing_src = tmp.path().join("pads").join("missing.md");
+        let dest = tmp.path().join("important.md");
+        atomic_write(&dest, "DO NOT LOSE THIS").unwrap();
+
+        let err = export_pad_from(&missing_src, &dest).unwrap_err();
+        assert!(err.contains("read pad"), "got: {err}");
+        // Destination is byte-for-byte unchanged — never overwritten with empty.
+        assert_eq!(
+            fs::read_to_string(&dest).unwrap(),
+            "DO NOT LOSE THIS",
+            "export must not clobber the destination when the source is unreadable"
+        );
+    }
+
+    #[test]
+    fn export_does_not_create_destination_when_source_unreadable() {
+        // When there's no pre-existing destination, a failed source read must not
+        // leave behind a stray empty file either.
+        let tmp = TmpDir::new("export-nocreate");
+        let missing_src = tmp.path().join("pads").join("missing.md");
+        let dest = tmp.path().join("new-export.md");
+
+        assert!(export_pad_from(&missing_src, &dest).is_err());
+        assert!(
+            !dest.exists(),
+            "no destination file should be created on a source read error"
+        );
+    }
+
+    // --- #57: read_index distinguishes absent (fresh) from corrupt (error) ---
+
+    #[test]
+    fn read_index_returns_fresh_default_on_first_run() {
+        // No index.json present at all -> genuinely first run -> a fresh default
+        // workspace (one starter pad) is the correct, expected result.
+        let tmp = TmpDir::new("index-firstrun");
+        let idx = read_index_in(tmp.path()).unwrap();
+        assert_eq!(idx.pads.len(), 1, "fresh workspace seeds one starter pad");
+        assert!(idx.active_pad_id.is_some());
+    }
+
+    #[test]
+    fn read_index_errors_on_corrupt_existing_index() {
+        // The #57 bug: ANY read/parse failure used to silently return a fresh
+        // EMPTY workspace, hiding the user's real pads and risking a later
+        // save_index overwriting their only copy. A present-but-unparseable
+        // index.json must now surface an error instead.
+        let tmp = TmpDir::new("index-corrupt");
+        atomic_write(&tmp.path().join("index.json"), "{ this is not valid json").unwrap();
+
+        let err = read_index_in(tmp.path()).unwrap_err();
+        assert!(err.contains("parse index.json"), "got: {err}");
+        // The real (corrupt-but-present) index file is left on disk untouched for
+        // recovery — never silently replaced by an empty workspace.
+        assert!(tmp.path().join("index.json").exists());
+    }
+
+    #[test]
+    fn read_index_roundtrips_a_real_index() {
+        // A well-formed existing index is returned as-is (not replaced by fresh).
+        let tmp = TmpDir::new("index-real");
+        let index = Index {
+            version: 1,
+            active_pad_id: Some("pad-x".into()),
+            pads: vec![
+                PadMeta {
+                    id: "pad-x".into(),
+                    title: "First".into(),
+                    color: "amber".into(),
+                    order: 0,
+                    created_at: 1,
+                    updated_at: 2,
+                },
+                PadMeta {
+                    id: "pad-y".into(),
+                    title: "Second".into(),
+                    color: "blue".into(),
+                    order: 1,
+                    created_at: 3,
+                    updated_at: 4,
+                },
+            ],
+            settings: Settings::default(),
+        };
+        let json = serde_json::to_string_pretty(&index).unwrap();
+        atomic_write(&tmp.path().join("index.json"), &json).unwrap();
+
+        let back = read_index_in(tmp.path()).unwrap();
+        assert_eq!(back.pads.len(), 2);
+        assert_eq!(back.active_pad_id.as_deref(), Some("pad-x"));
+        assert_eq!(back.pads[1].id, "pad-y");
     }
 }

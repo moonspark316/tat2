@@ -171,9 +171,15 @@ export class AutoSaver {
       await task();
     })();
     this.inflight.set(id, run);
-    void run.finally(() => {
+    // Clean up on settle WITHOUT a bare `.finally(...)`: a rejected `run` would
+    // make the derived `.finally` promise reject too, and discarding it (`void`)
+    // leaks an unhandled rejection even though the caller handles `run` itself.
+    // `then(cb, cb)` settles the cleanup promise on both paths (mirrors the
+    // pattern in `flushOne`), so only the returned `run` carries the rejection.
+    const cleanup = () => {
       if (this.inflight.get(id) === run) this.inflight.delete(id);
-    });
+    };
+    run.then(cleanup, cleanup);
     return run;
   }
 
