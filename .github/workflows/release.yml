@@ -1,15 +1,73 @@
 name: Release
 
-# On a v* tag, build native bundles for every desktop OS on GitHub-hosted
-# runners (free for public repos) and upload them to the GitHub Release.
-# Tag-only: dispatching from a branch would publish a release named after it.
+# Two ways to cut a release:
+#
+#   1. One command (recommended):
+#        gh workflow run release.yml -f version=1.2.0
+#      The `prepare` job bumps every manifest, commits "release: v1.2.0" to main,
+#      tags it, and the build matrix publishes — all in ONE run, so no PAT is
+#      needed (a GITHUB_TOKEN-pushed tag would NOT trigger a separate workflow).
+#
+#   2. Push a `v*` tag yourself — the build matrix runs for that tag.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release — X.Y.Z, no leading v"
+        required: true
+        type: string
 
 jobs:
+  # Manual-dispatch only: bump manifests, commit to main, and create the tag.
+  prepare:
+    name: Bump & tag v${{ inputs.version }}
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate version is X.Y.Z
+        run: |
+          echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "::error::version must be X.Y.Z (got '${{ inputs.version }}')"; exit 1; }
+
+      - name: Refuse if tag already exists
+        run: |
+          if git rev-parse "v${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::tag v${{ inputs.version }} already exists"; exit 1
+          fi
+
+      - name: Bump manifests, commit, tag, push
+        env:
+          V: ${{ inputs.version }}
+        run: |
+          # package.json + tauri.conf.json (JSON — edit via node, preserve shape)
+          node -e "const f='package.json',j=require('./'+f);j.version=process.env.V;require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+          node -e "const f='src-tauri/tauri.conf.json',j=require('./'+f);j.version=process.env.V;require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+          # Cargo.toml [package] version (first `version = ` line)
+          sed -i "0,/^version = \".*\"/s//version = \"$V\"/" src-tauri/Cargo.toml
+          # Cargo.lock: the `version` on the line after `name = "tat2"`
+          sed -i "/^name = \"tat2\"\$/{n;s/^version = \".*\"/version = \"$V\"/}" src-tauri/Cargo.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git commit -m "release: v$V"
+          git tag "v$V"
+          git push origin HEAD:main
+          git push origin "v$V"
+
   release:
     name: Build & upload (${{ matrix.label }})
+    needs: prepare
+    # Run after a successful prepare (dispatch) OR directly on a pushed tag.
+    if: ${{ always() && (needs.prepare.result == 'success' || github.event_name == 'push') }}
     permissions:
       contents: write
     strategy:
@@ -33,6 +91,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # On dispatch, build the freshly-created tag; on tag-push, the ref itself.
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
 
       - name: Install Tauri system dependencies (Linux)
         if: matrix.label == 'Linux'
@@ -81,8 +142,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
+          tagName: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          releaseName: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

@@ -75,6 +75,23 @@ Browse the [issues](https://github.com/moonspark316/tat2/issues), especially
 anything labelled **good-first-issue**. The roadmap (sync, cross-platform
 polish, signed releases) lives in `README.md` and the GitHub epics.
 
+## Releasing (maintainers)
+
+Cutting a release is one command — it bumps every manifest, commits, tags, and
+publishes signed bundles for macOS/Windows/Linux to the GitHub Release:
+
+```bash
+gh workflow run release.yml -f version=1.2.0     # no leading "v"
+gh run watch                                     # follow the build
+```
+
+The `prepare` job updates `package.json`, `src-tauri/Cargo.toml`,
+`tauri.conf.json`, and `Cargo.lock`, commits `release: v1.2.0` to `main`, and
+tags it; the build matrix then publishes — all in one run. (Pushing a `v*` tag
+by hand also triggers the build.) Auto-update manifests (`latest.json`) are
+signed only if the `TAURI_SIGNING_PRIVATE_KEY` / `…_PASSWORD` repo secrets are
+set; without them the bundles still publish, just unsigned for the updater.
+
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the Rust core, Tauri bridge, and
