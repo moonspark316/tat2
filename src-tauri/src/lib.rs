@@ -263,6 +263,13 @@ pub fn run() {
 
             // ---- Menubar behavior: hide when focus is lost (unless pinned) ----
             if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
+                // Let the popover appear over other apps' full-screen Spaces
+                // (macOS), like a real menu-bar utility. A plain always-on-top
+                // window can't draw over a full-screen app; this sets the
+                // NSWindow collection behavior (canJoinAllSpaces |
+                // fullScreenAuxiliary) so the summoned pad floats above it.
+                let _ = win.set_visible_on_all_workspaces(true);
+
                 let w = win.clone();
                 win.on_window_event(move |event| match event {
                     WindowEvent::Focused(false) => {
