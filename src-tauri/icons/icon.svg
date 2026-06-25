@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Tat2 app icon — an ink-on-paper brand mark.
+    A bold lowercase "t" drawn as a single nib/brush ink stroke, paired with a
+    small ink dot that echoes the app's colored pad dots. Sits on a warm rounded
+    "paper" tile with the app's faint corner light and a subtle neon glow.
+    Palette is taken verbatim from src/palette.ts (amber swatch):
+      paper bg #FBF6E9 / chrome #F6EDD4, ink #3a3326, neon accent (dot) #E3B341.
+  -->
+  <defs>
+    <!-- Warm paper surface: amber bg lifting to a touch lighter at top. -->
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDFAF1"/>
+      <stop offset="0.55" stop-color="#FBF6E9"/>
+      <stop offset="1" stop-color="#F6EDD4"/>
+    </linearGradient>
+
+    <!-- Faint warm light from the top-left corner. -->
+    <radialGradient id="warmCorner" cx="0.16" cy="0.14" r="0.85">
+      <stop offset="0" stop-color="#FFF3D2" stop-opacity="0.85"/>
+      <stop offset="0.5" stop-color="#FFF3D2" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Faint cool light from the bottom-right corner. -->
+    <radialGradient id="coolCorner" cx="0.86" cy="0.9" r="0.85">
+      <stop offset="0" stop-color="#E9EEF6" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#E9EEF6" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Ink fill: near-black warm brown with a subtle vertical depth. -->
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#43392a"/>
+      <stop offset="1" stop-color="#33291d"/>
+    </linearGradient>
+
+    <!-- Soft neon glow behind the mark (amber accent). -->
+    <filter id="neon" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="22" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+      </feMerge>
+    </filter>
+
+    <!-- Gentle ink bleed so the stroke reads like nib ink, not vector plastic. -->
+    <filter id="bleed" x="-15%" y="-15%" width="130%" height="130%">
+      <feGaussianBlur stdDeviation="1.1"/>
+    </filter>
+
+    <!-- Rounded-square tile clip. -->
+    <clipPath id="tile">
+      <rect x="64" y="64" width="896" height="896" rx="208" ry="208"/>
+    </clipPath>
+  </defs>
+
+  <!-- ===== Paper tile ===== -->
+  <g clip-path="url(#tile)">
+    <rect x="64" y="64" width="896" height="896" fill="url(#paper)"/>
+    <rect x="64" y="64" width="896" height="896" fill="url(#warmCorner)"/>
+    <rect x="64" y="64" width="896" height="896" fill="url(#coolCorner)"/>
+  </g>
+  <!-- Hairline edge to seat the tile. -->
+  <rect x="64.5" y="64.5" width="895" height="895" rx="207.5" ry="207.5"
+        fill="none" stroke="#E3D6B0" stroke-opacity="0.6" stroke-width="1.5"/>
+
+  <!-- ===== Neon glow halo behind the mark (amber) ===== -->
+  <!-- Glow tracks the stem's belly and the foot/dot, kept clear of the crossbar
+       so the top of the mark stays crisp. -->
+  <g filter="url(#neon)" opacity="0.4">
+    <path d="M497 430 q-8 110 -6 210 q4 92 70 96 q44 2 84 -24"
+          fill="none" stroke="#E3B341" stroke-width="104"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="654" cy="696" r="58" fill="#E3B341"/>
+  </g>
+
+  <!-- ===== The ink mark: lowercase "t" as one brush stroke + ink dot ===== -->
+  <g filter="url(#bleed)">
+    <!--
+      The "t" is a single confident downstroke that swells slightly (nib
+      pressure) and lifts into a small upward flick at the foot, crossed by a
+      tapered bar — drawn as filled paths so the weight reads at tray size.
+    -->
+    <!-- Stem (vertical), built as a closed shape that tapers from top to a
+         pressure-swelled belly then flicks up at the foot. -->
+    <path d="
+        M447 286
+        C443 286 437 290 436 300
+        C430 430 428 560 430 636
+        C432 712 462 762 540 762
+        C586 762 622 748 650 724
+        C658 717 656 704 646 701
+        C612 690 590 678 578 660
+        C566 642 562 612 560 568
+        C556 470 558 372 560 300
+        C560 290 554 286 548 286
+        Z"
+      fill="url(#ink)"/>
+
+    <!-- Crossbar: a tapered horizontal nib stroke, slightly tilted, crossing the
+         stem the way a handwritten t-bar does. -->
+    <path d="
+        M366 408
+        C436 388 562 380 666 396
+        C678 398 682 414 672 420
+        C570 438 452 444 376 436
+        C362 435 354 412 366 408
+        Z"
+      fill="url(#ink)"/>
+
+    <!-- Ink dot — echoes the app's colored pad dots; the brand neon amber with
+         an ink-dark core so it reads at 16px. Placed at the baseline to the
+         right, where the foot-flick gestures toward it. -->
+    <circle cx="664" cy="694" r="58" fill="#E3B341"/>
+    <circle cx="664" cy="694" r="58" fill="none" stroke="#caa033" stroke-width="3"/>
+  </g>
+</svg>
