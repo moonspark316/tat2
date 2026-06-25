@@ -22,12 +22,12 @@
   /* Two oversized, soft color pools that slowly drift across the sheet. */
   --glow-warm: radial-gradient(
     45% 45% at 30% 30%,
-    color-mix(in srgb, var(--dot) 12%, transparent),
+    color-mix(in srgb, var(--dot) 20%, transparent),
     transparent 70%
   );
   --glow-cool: radial-gradient(
     42% 42% at 72% 72%,
-    color-mix(in srgb, var(--ink) 6%, transparent),
+    color-mix(in srgb, var(--ink) 9%, transparent),
     transparent 70%
   );
 
@@ -103,27 +103,27 @@ body,
  * Each color places its neon glow in its own region with its own temperament,
  * so switching pads genuinely changes the room — all still a whisper. */
 .app[data-color="amber"] {
-  --glow-warm: radial-gradient(46% 50% at 20% 40%, color-mix(in srgb, var(--dot) 13%, transparent), transparent 70%);
+  --glow-warm: radial-gradient(46% 50% at 20% 40%, color-mix(in srgb, var(--dot) 20%, transparent), transparent 70%);
 }
 .app[data-color="orange"] {
-  --glow-warm: radial-gradient(50% 48% at 26% 82%, color-mix(in srgb, var(--dot) 13%, transparent), transparent 70%);
+  --glow-warm: radial-gradient(50% 48% at 26% 82%, color-mix(in srgb, var(--dot) 20%, transparent), transparent 70%);
 }
 .app[data-color="red"] {
-  --glow-warm: radial-gradient(44% 46% at 16% 52%, color-mix(in srgb, var(--dot) 14%, transparent), transparent 68%);
+  --glow-warm: radial-gradient(44% 46% at 16% 52%, color-mix(in srgb, var(--dot) 21%, transparent), transparent 68%);
 }
 .app[data-color="purple"] {
   /* deep futuristic haze from the top + a low ink pool */
-  --glow-warm: radial-gradient(58% 52% at 50% 6%, color-mix(in srgb, var(--dot) 14%, transparent), transparent 72%);
+  --glow-warm: radial-gradient(58% 52% at 50% 6%, color-mix(in srgb, var(--dot) 21%, transparent), transparent 72%);
   --glow-cool: radial-gradient(46% 46% at 80% 92%, color-mix(in srgb, var(--ink) 9%, transparent), transparent 70%);
 }
 .app[data-color="blue"] {
-  --glow-warm: radial-gradient(50% 48% at 78% 24%, color-mix(in srgb, var(--dot) 12%, transparent), transparent 70%);
+  --glow-warm: radial-gradient(50% 48% at 78% 24%, color-mix(in srgb, var(--dot) 20%, transparent), transparent 70%);
 }
 .app[data-color="teal"] {
-  --glow-warm: radial-gradient(48% 50% at 74% 78%, color-mix(in srgb, var(--dot) 12%, transparent), transparent 70%);
+  --glow-warm: radial-gradient(48% 50% at 74% 78%, color-mix(in srgb, var(--dot) 20%, transparent), transparent 70%);
 }
 .app[data-color="green"] {
-  --glow-warm: radial-gradient(46% 48% at 24% 26%, color-mix(in srgb, var(--dot) 12%, transparent), transparent 70%);
+  --glow-warm: radial-gradient(46% 48% at 24% 26%, color-mix(in srgb, var(--dot) 20%, transparent), transparent 70%);
 }
 
 /* ---- Top bar ---- */
@@ -245,7 +245,7 @@ body,
   font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
     monospace;
   /* Typewriter ink on paper: the text always comes out strong. */
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.01em;
   -webkit-font-smoothing: subpixel-antialiased;
   /* The cursor is this pad's ink. */
@@ -255,7 +255,7 @@ body,
 }
 .editor::placeholder {
   color: color-mix(in srgb, var(--ink) 38%, transparent);
-  font-weight: 500;
+  font-weight: 600;
 }
 /* Selecting text glows in the pad's color. */
 .editor::selection,
@@ -644,7 +644,7 @@ body,
   padding: 16px 18px;
   line-height: 1.6;
   color: var(--ink);
-  font-weight: 500;
+  font-weight: 600;
   user-select: text;
   -webkit-user-select: text;
 }
