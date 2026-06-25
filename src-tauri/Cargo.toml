@@ -28,6 +28,8 @@ serde_json = "1"
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 # macOS-only: activate the app + raise the popover window so it reliably grabs
 # keyboard focus on the active Space (see `focus_app_macos` in lib.rs). Pinned

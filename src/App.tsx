@@ -8,7 +8,9 @@ import {
 } from "@tauri-apps/plugin-autostart";
 import { swatch, themeVars } from "./palette";
 import { useWorkspace } from "./hooks/useWorkspace";
+import { useUpdater } from "./hooks/useUpdater";
 import { TopBar } from "./components/TopBar";
+import { UpdatePill } from "./components/UpdatePill";
 import { Editor } from "./components/Editor";
 import { StatusBar } from "./components/StatusBar";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -39,6 +41,7 @@ function prefersDark(): boolean {
 
 export default function App() {
   const ws = useWorkspace();
+  const updater = useUpdater();
   // The full-screen overlays are mutually exclusive — exactly one (or none) is
   // up at a time — so they're one piece of state, not N booleans that can drift
   // into illegal "two open at once" combos. Find is deliberately separate: it's
@@ -218,6 +221,13 @@ export default function App() {
     void ws.flush().then(() => hidePopover());
   };
 
+  // Persist every pending keystroke before the app restarts into the new build,
+  // so an update can never drop in-flight edits (data-safety rule #2).
+  const handleRestartForUpdate = async () => {
+    await ws.flush();
+    await updater.restart();
+  };
+
   // Native file dialogs steal focus; pin the popover so it doesn't auto-hide,
   // then restore the user's pin preference afterwards.
   const handleExport = async () => {
@@ -320,6 +330,14 @@ export default function App() {
         onClose={closeWindow}
       />
 
+      {updater.state.status === "ready" ? (
+        <UpdatePill
+          version={updater.state.version}
+          onRestart={() => void handleRestartForUpdate()}
+          onDismiss={updater.dismiss}
+        />
+      ) : null}
+
       {modal === "settings" && ws.activePad ? (
         <SettingsPanel
           pad={ws.activePad}
@@ -336,6 +354,10 @@ export default function App() {
           onImport={handleImport}
           autostartOn={autostartOn}
           onToggleAutostart={toggleAutostart}
+          updateStatus={updater.state.status}
+          updateVersion={updater.state.version}
+          onCheckUpdate={updater.check}
+          onRestartUpdate={() => void handleRestartForUpdate()}
           onTrash={() => setModal("trash")}
           onDelete={() => {
             ws.removePad(ws.activePad!.id);

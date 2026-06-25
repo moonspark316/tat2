@@ -74,6 +74,33 @@ Grab a prebuilt bundle from the
 > Windows installers aren't published yet — the release CI is wired for them but
 > needs hosted-runner billing enabled. Build from source in the meantime.
 
+### Auto-update
+
+Tat2 quietly checks for a new signed build shortly after launch, downloads it in
+the background, and — only once it's downloaded and its **minisign** signature
+verifies — shows a small dismissible *"Update ready — restart"* pill. There's no
+spinner, no "checking…" toast, and no version-behind badge; you can also trigger
+a manual check from **Settings → Updates**.
+
+The update feed is the GitHub release manifest at
+`releases/latest/download/latest.json`, signed with the updater's private key in
+CI. For maintainers, releasing signed updates needs two GitHub Actions secrets:
+
+| Secret | Value |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | Contents of the updater private key file |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password set when the key was generated |
+
+The matching **public** key is committed in `src-tauri/tauri.conf.json`
+(`plugins.updater.pubkey`); rotating the key means regenerating the pair
+(`pnpm tauri signer generate`) and updating both. Without the secrets the release
+build still succeeds but produces no signed `latest.json`, so clients simply find
+no update.
+
+> The updater's minisign signature is independent of OS code-signing. Until
+> macOS notarization lands (the cert is still pending), macOS users get the same
+> unsigned-app first-launch step on each update as they do on a fresh install.
+
 ## Run from source
 
 Prerequisites: **Node 18+**, **pnpm**, **Rust 1.77+**, and the
@@ -104,6 +131,7 @@ system tray**, or press the global shortcut:
 - Light / dark / system theme; adjustable text size
 - Markdown preview (sanitized); export / import pads
 - Launch-at-login; pin-to-keep-open; remembers window size
+- Quiet background **auto-update** with signed release feed + restart-to-apply
 - Keyboard: `⌘N` new · `⌘1‑9` switch · `⌘[`/`⌘]` prev/next · `Esc` hide
 
 ## Roadmap
@@ -115,9 +143,9 @@ Tracked as GitHub epics & issues.
 - **Cross-platform polish** — Windows/Linux tray anchoring, HiDPI/multi-monitor
   *(needs testing on those OSes)*
 - **Release** — `v1.0.0` ships unsigned **macOS** (universal) + **Linux**
-  (`.deb`/`.rpm`) bundles via tagged CI; **Windows** bundles + **code
-  signing/notarization** + **auto-update** are still open *(need hosted-runner
-  billing, certs, and keys)*
+  (`.deb`/`.rpm`) bundles via tagged CI, with a quiet signed **auto-update**
+  feed (`latest.json`); **Windows** bundles + macOS **code
+  signing/notarization** are still open *(need hosted-runner billing and certs)*
 
 ---
 
