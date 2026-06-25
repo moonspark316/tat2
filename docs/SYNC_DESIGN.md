@@ -1,8 +1,10 @@
 # Tat2 Sync — Design (Epic E3)
 
-Status: **design / not yet implemented.** This document anchors issues #16–#21.
-It exists so the sync work can be picked up coherently and so the local-first
-data model we already ship doesn't paint us into a corner.
+Status: **partially implemented.** The offline-verifiable core has landed:
+#16 (Automerge model), #21 (merge test suite), #20 (synced-folder stop-gap
+backend). The networked pieces (#17 engine, #18 relay, #19 pairing) remain
+design-only. This document anchors issues #16–#21 and is kept honest about
+what's actually built.
 
 ## Goals
 
@@ -34,6 +36,14 @@ the seed.
 
 Open question: text CRDT granularity. Use `Automerge.Text`/`splice` on a single
 `content` field so character-level edits merge (not whole-string replace).
+
+> **Resolved (implementation note):** in Automerge **v3** the `Automerge.Text`
+> class no longer exists — a plain JS `string` field IS a character-level text
+> CRDT, edited with `Automerge.splice` / `Automerge.updateText`. We therefore use
+> a single `content: string` field and diff each saved value into splices. This
+> is the v3-correct realization of "Text/splice on a `content` field" and merges
+> per-character (see `src/automerge/padDoc.ts` and the convergence suite in
+> `src/automerge/convergence.test.ts`).
 
 ## Background sync engine + offline queue — #17
 
@@ -92,9 +102,26 @@ directory at an existing synced folder (iCloud Drive / Dropbox / Syncthing).
 - Add a configurable workspace root (stored outside the workspace, e.g.
   `app_config_dir/config.json`), with a guided "move my data" flow.
 - Because writes are atomic and—once #16 lands—CRDT-merged, two devices editing
-  the same synced folder reconcile instead of fighting. Until #16, document the
-  caveat that simultaneous edits to the *same pad* on two devices can conflict
-  at the file level (the synced-folder tool may create conflict copies).
+  the same synced folder reconcile instead of fighting.
+
+> **Caveat resolved (#16 has landed):** the pre-#16 risk was that simultaneous
+> edits to the *same pad* on two devices could conflict at the file level and
+> the synced-folder tool might create conflict copies. Now that each pad is an
+> Automerge doc, on every launch the frontend merges any `.automerge` it finds
+> on disk into its in-memory doc (`PadDocStore.merge`), so concurrent edits
+> converge per-character and the `.md` mirror is rewritten from the converged
+> text. A synced-folder conflict copy of a `.automerge` is itself just another
+> set of changes that merges cleanly. (Live cross-device propagation while both
+> apps are open still waits on the relay, #17/#18; the stop-gap reconciles at
+> launch / on reload.)
+
+Backend implemented in this iteration: a workspace root configurable via
+`get_workspace_location` / `set_workspace_root` / `clear_workspace_root`
+(`src-tauri/src/storage.rs`), stored in `app_config_dir/config.json` (outside
+the workspace). `set_workspace_root` copies the workspace to the new root,
+switches the config pointer, then removes the old copy — source data is never
+deleted before the destination is complete, and it refuses to move into a
+directory that already holds a workspace.
 
 ## Conflict-free merge test suite — #21
 
@@ -110,7 +137,12 @@ Property/simulation tests, runnable in CI, proving no data loss:
 ## Sequencing
 
 1. #16 Automerge model (local only) — unlocks everything; verifiable offline.
+   **DONE** — `src/automerge/{padDoc,store,actor}.ts`, `.automerge` persisted
+   alongside `.md` via `save_pad_doc`.
 2. #21 merge tests — lock in convergence before adding a network.
+   **DONE** — `src/automerge/convergence.test.ts` (seeded, reproducible).
 3. #20 synced-folder stop-gap — useful sync with no server.
+   **DONE (backend)** — configurable workspace root + safe "move my data" flow
+   in `src-tauri/src/storage.rs`. (UI surface still to be wired in App settings.)
 4. #18 relay + #17 engine — real background sync.
 5. #19 pairing — multi-device onboarding.
