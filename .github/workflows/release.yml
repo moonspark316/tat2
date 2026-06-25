@@ -2,10 +2,10 @@ name: Release
 
 # On a v* tag, build native bundles for every desktop OS on GitHub-hosted
 # runners (free for public repos) and upload them to the GitHub Release.
+# Tag-only: dispatching from a branch would publish a release named after it.
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 jobs:
   release:
@@ -25,7 +25,9 @@ jobs:
             args: ""
             rustup-target: ""
           - label: Linux
-            os: ubuntu-latest
+            # Pinned to 22.04: ubuntu-latest (24.04) lacks libfuse2, which the
+            # AppImage bundler needs — it would build deb/rpm then die on AppImage.
+            os: ubuntu-22.04
             args: ""
             rustup-target: ""
     runs-on: ${{ matrix.os }}
