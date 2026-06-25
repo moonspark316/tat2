@@ -96,18 +96,51 @@ export type PersistFn = (id: string, content: string) => Promise<void>;
  * Coalesces rapid keystrokes into a single debounced write per pad, and can be
  * flushed synchronously (on blur / hide / quit) so nothing is ever lost. There
  * is intentionally NO "saving…" / "saved" surface — saving just always works.
+ *
+ * Durability model
+ * ----------------
+ * A failed save is retried *inline, inside the awaited in-flight promise* with
+ * bounded backoff — never re-scheduled behind a fresh debounce timer. This is
+ * the crux of the data-safety rule: `flushAll()` (called on blur/hide/quit)
+ * must not resolve while *any* write is still owed, so the awaited promise has
+ * to stay unresolved until the bytes are actually on disk (or every bounded
+ * attempt is exhausted, in which case it rejects loudly rather than lying).
+ *
+ * Each retry re-reads the LATEST content for the pad from `pending` before
+ * writing, so a retry can never clobber a newer edit with stale text, and the
+ * single in-flight loop is the only writer for an id, which preserves per-pad
+ * write ordering. `cancel()`/`idle()` tear down the retry loop (abort flag +
+ * backoff timer) so nothing can resurrect a write after the saver was told to
+ * stop.
  */
 export class AutoSaver {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private pending = new Map<string, string>();
-  /** Writes that have started (persist in progress) — awaitable via idle(). */
+  /** Writes that have started (persist in progress) — awaitable via idle().
+   *  Stays unresolved across retries until the bytes land (or attempts run out). */
   private inflight = new Map<string, Promise<void>>();
+  /** Abort tokens for in-flight retry loops, keyed by id. Bumping the token (or
+   *  deleting it) makes the running loop stop before its next attempt. */
+  private aborters = new Map<string, { aborted: boolean }>();
+  /** Pending backoff sleeps, so cancel()/idle() can wake them immediately. */
+  private backoffs = new Map<string, () => void>();
   private delay: number;
   private persist: PersistFn;
+  /** Max save attempts before surfacing a real rejection (1 try + N retries). */
+  private maxAttempts: number;
+  /** Base backoff between retry attempts; grows linearly per attempt. */
+  private retryDelay: number;
 
-  constructor(delayMs = 400, persist: PersistFn = savePadNow) {
+  constructor(
+    delayMs = 400,
+    persist: PersistFn = savePadNow,
+    maxAttempts = 5,
+    retryDelayMs = 400,
+  ) {
     this.delay = delayMs;
     this.persist = persist;
+    this.maxAttempts = maxAttempts;
+    this.retryDelay = retryDelayMs;
   }
 
   /** Queue a debounced save for a pad. */
@@ -118,7 +151,11 @@ export class AutoSaver {
     this.timers.set(
       id,
       setTimeout(() => {
-        void this.flushOne(id);
+        void this.flushOne(id).catch((err) => {
+          // Debounced path can't surface rejections to anyone; log only. The
+          // pending edit (if newer) is still queued and will be retried.
+          console.error("autosave failed after retries", err);
+        });
       }, this.delay),
     );
   }
@@ -144,20 +181,58 @@ export class AutoSaver {
     const timer = this.timers.get(id);
     if (timer) clearTimeout(timer);
     this.timers.delete(id);
-    const content = this.pending.get(id);
     // Nothing queued — return any in-flight write so callers can await it.
-    if (content === undefined) return this.inflight.get(id) ?? Promise.resolve();
-    this.pending.delete(id);
+    if (!this.pending.has(id))
+      return this.inflight.get(id) ?? Promise.resolve();
 
-    return this.chain(id, async () => {
-      try {
-        await this.persist(id, content);
-      } catch (err) {
-        // Never fail loudly: requeue and try again shortly.
-        console.error("autosave retry", err);
-        this.queue(id, content);
+    // If a write is already in flight, it already owns this id and will pick
+    // up the newer `pending` value on its next attempt — just await it.
+    const prior = this.inflight.get(id);
+    if (prior) return prior;
+
+    const aborter = { aborted: false };
+    this.aborters.set(id, aborter);
+
+    const run = (async () => {
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
+        if (aborter.aborted) return; // cancelled — drop silently
+        // Always persist the LATEST queued content, never stale captured text.
+        const content = this.pending.get(id);
+        if (content === undefined) return; // nothing left to write
+        try {
+          // Use the injected persist fn (since #16 this folds the save into the
+          // Automerge doc + writes both `.automerge` and the `.md` mirror) —
+          // NOT savePadNow, which would bypass the CRDT store and only write .md.
+          await this.persist(id, content);
+        } catch (err) {
+          lastErr = err;
+          if (aborter.aborted) return;
+          console.error("autosave retry", err);
+          await this.sleep(id, this.retryDelay * (attempt + 1));
+          continue;
+        }
+        // Success. Only clear the pending entry if it wasn't superseded by a
+        // newer edit while the write was in flight; otherwise loop and write
+        // the newer content (preserving ordering — we're the sole writer).
+        if (this.pending.get(id) === content) {
+          this.pending.delete(id);
+          return;
+        }
+        attempt = -1; // newer content arrived: reset the attempt budget
       }
-    });
+      // Exhausted every attempt: surface a real rejection rather than a false
+      // success, so flushAll() callers (quit/hide) can see the failure.
+      throw lastErr ?? new Error(`autosave failed for ${id}`);
+    })();
+
+    this.inflight.set(id, run);
+    const cleanup = () => {
+      if (this.inflight.get(id) === run) this.inflight.delete(id);
+      if (this.aborters.get(id) === aborter) this.aborters.delete(id);
+    };
+    run.then(cleanup, cleanup);
+    return run;
   }
 
   /**
@@ -168,29 +243,59 @@ export class AutoSaver {
    */
   enqueue(id: string, task: () => Promise<void>): Promise<void> {
     return this.chain(id, task);
+
+  /** Interruptible sleep used between retry attempts. Resolves early (so the
+   *  retry loop re-checks its abort flag and bails) when cancel()/idle() fire. */
+  private sleep(id: string, ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        this.backoffs.delete(id);
+        resolve();
+      }, ms);
+      this.backoffs.set(id, () => {
+        clearTimeout(timer);
+        this.backoffs.delete(id);
+        resolve();
+      });
+    });
   }
 
-  /** Drop any QUEUED (not-yet-started) write for a pad. Does not abort an
-   *  in-flight write — use idle(id) to await that. */
+  /** Drop any QUEUED (not-yet-started) write for a pad AND stop an in-flight
+   *  retry loop so a late retry can never resurrect/clobber after cancel. */
   cancel(id: string) {
     const timer = this.timers.get(id);
     if (timer) clearTimeout(timer);
     this.timers.delete(id);
     this.pending.delete(id);
+    const aborter = this.aborters.get(id);
+    if (aborter) aborter.aborted = true;
+    this.backoffs.get(id)?.(); // wake a sleeping retry so it sees the abort
   }
 
   /** Resolve once any in-flight write for a pad has finished, so destructive
-   *  ops (trash/restore) can't be overtaken by a late save recreating the file. */
+   *  ops (trash/restore) can't be overtaken by a late save recreating the file.
+   *  Also wakes a backoff sleep so a retry loop can't outlive this await. */
   async idle(id: string): Promise<void> {
+    const aborter = this.aborters.get(id);
+    if (aborter) aborter.aborted = true;
+    this.backoffs.get(id)?.();
     await this.inflight.get(id)?.catch(() => {});
   }
 
-  /** Persist everything pending and await all in-flight writes. */
+  /** Persist everything pending and await all in-flight writes. Loops until
+   *  BOTH `pending` and `inflight` are drained, so it can never resolve while a
+   *  retry is still owed (the data-safety guarantee for blur/hide/quit). */
   async flushAll(): Promise<void> {
-    const ids = new Set<string>([
-      ...this.pending.keys(),
-      ...this.inflight.keys(),
-    ]);
-    await Promise.all([...ids].map((id) => this.flushOne(id)));
+    // Bounded so a permanently-failing write can't hang shutdown forever; once
+    // a write exhausts its own retry budget it rejects and we surface that.
+    for (let pass = 0; pass < this.maxAttempts + 1; pass++) {
+      const ids = new Set<string>([
+        ...this.pending.keys(),
+        ...this.inflight.keys(),
+      ]);
+      if (ids.size === 0) return;
+      await Promise.all([...ids].map((id) => this.flushOne(id)));
+      if (this.pending.size === 0 && this.inflight.size === 0) return;
+    }
   }
 }
