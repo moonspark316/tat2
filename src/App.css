@@ -23,6 +23,18 @@
     color-mix(in srgb, var(--ink) 14%, transparent) 1px,
     transparent 1.7px
   );
+  /* Page lit by a window: a warm pool of the pad's accent in the top-left,
+     a cool depth of the ink tone in the bottom-right. Kept to a whisper. */
+  --paper-glow: radial-gradient(
+      60% 55% at 6% -2%,
+      color-mix(in srgb, var(--dot) 9%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      55% 50% at 100% 102%,
+      color-mix(in srgb, var(--ink) 6%, transparent),
+      transparent 60%
+    );
 
   font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
@@ -51,8 +63,8 @@ body,
 .boot {
   height: 100%;
   background-color: var(--bg);
-  background-image: var(--paper-dots), var(--paper-grad);
-  background-size: 22px 22px, cover;
+  background-image: var(--paper-dots), var(--paper-glow), var(--paper-grad);
+  background-size: 22px 22px, cover, cover;
   border-radius: var(--radius);
 }
 
@@ -63,8 +75,8 @@ body,
   /* Paper: gentle gradient + a faint pad-colored dot grid. The chrome rails
      (top/status bars) paint opaque on top, so texture shows only on the sheet. */
   background-color: var(--bg);
-  background-image: var(--paper-dots), var(--paper-grad);
-  background-size: 22px 22px, cover;
+  background-image: var(--paper-dots), var(--paper-glow), var(--paper-grad);
+  background-size: 22px 22px, cover, cover;
   background-position: center, center;
   border-radius: var(--radius);
   overflow: hidden;
