@@ -46,11 +46,18 @@ export function useWorkspace() {
           : (ws.contents[pad.id] ?? "");
       }
       setContents(text);
-      // Make the migration durable: persist each freshly-seeded pad's binary
-      // once. The `.md` is rewritten with identical text (atomic, lossless).
+      // Make the migration durable: persist each freshly-seeded/healed pad's
+      // binary once. Route it through the AutoSaver's per-id serialized chain
+      // (not a bare `savePadDocNow`) so a very fast first keystroke's write to
+      // the same `<id>.md`/`.automerge` is strictly ordered after the migration
+      // write and can't race it on the temp files. The `.md` is rewritten with
+      // identical text (atomic, lossless); persistence stays invisible.
       for (const id of migrated) {
-        const bytes = store.current.bytes(id);
-        if (bytes) void savePadDocNow(id, bytes, store.current.text(id));
+        void saver.current
+          .enqueue(id, () => store.current.persistFn(id, store.current.text(id)))
+          // Never fail loudly: the `.md` source of truth is already on disk, so
+          // a failed binary re-persist just retries on the next edit/launch.
+          .catch((err) => console.error("migration persist", err));
       }
     });
   }, []);

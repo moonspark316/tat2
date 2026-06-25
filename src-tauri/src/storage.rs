@@ -454,24 +454,39 @@ fn move_path(from: &Path, to: &Path) -> Result<(), String> {
     fs::rename(from, to).map_err(|e| format!("move {}: {e}", from.display()))
 }
 
-/// Soft-delete: move the pad's content + history into the trash, keeping meta so
-/// it can be fully restored. Nothing is ever hard-deleted here.
-#[tauri::command]
-pub fn trash_pad(app: AppHandle, meta: PadMeta) -> Result<(), String> {
+/// Soft-delete a pad within an explicit workspace `root`. Moves the pad's `.md`,
+/// `.automerge`, and history into `root/trash`, then writes the trash metadata.
+/// Path-based (no `AppHandle`) so it is unit-testable; [`trash_pad`] is the thin
+/// Tauri shell over it. Nothing is ever hard-deleted here.
+fn trash_pad_in(root: &Path, meta: PadMeta) -> Result<(), String> {
     let id = meta.id.clone();
-    let trash = trash_dir(&app)?;
-    move_path(&pad_path(&app, &id)?, &trash.join(format!("{id}.md")))?;
+    let trash = root.join("trash");
+    let pads = root.join("pads");
     move_path(
-        &doc_path(&app, &id)?,
+        &pads.join(format!("{id}.md")),
+        &trash.join(format!("{id}.md")),
+    )?;
+    move_path(
+        &pads.join(format!("{id}.automerge")),
         &trash.join(format!("{id}.automerge")),
     )?;
-    move_path(&history_dir(&app, &id)?, &trash.join("history").join(&id))?;
+    move_path(
+        &root.join("history").join(&id),
+        &trash.join("history").join(&id),
+    )?;
     let entry = TrashEntry {
         meta,
         deleted_at: now_ms(),
     };
     let json = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
     atomic_write(&trash.join(format!("{id}.json")), &json)
+}
+
+/// Soft-delete: move the pad's content + history into the trash, keeping meta so
+/// it can be fully restored. Nothing is ever hard-deleted here.
+#[tauri::command]
+pub fn trash_pad(app: AppHandle, meta: PadMeta) -> Result<(), String> {
+    trash_pad_in(&workspace_dir(&app)?, meta)
 }
 
 #[tauri::command]
@@ -515,14 +530,18 @@ pub fn list_trash(app: AppHandle) -> Result<Vec<TrashEntry>, String> {
     Ok(entries)
 }
 
-/// Move a trashed pad's files back and return its meta + content.
-#[tauri::command]
-pub fn restore_pad(app: AppHandle, id: String) -> Result<RestoredPad, String> {
+/// Restore a trashed pad within an explicit workspace `root`. Moves the pad's
+/// `.md`, `.automerge`, and history back out of `root/trash` and returns its
+/// meta, content, and binary (when present). Path-based (no `AppHandle`) so it
+/// is unit-testable; [`restore_pad`] is the thin Tauri shell over it.
+fn restore_pad_in(root: &Path, id: &str) -> Result<RestoredPad, String> {
+    let pads = root.join("pads");
+    let live_md = pads.join(format!("{id}.md"));
     // Never overwrite a live pad of the same id.
-    if pad_path(&app, &id)?.exists() {
+    if live_md.exists() {
         return Err(format!("a pad with id {id} already exists"));
     }
-    let trash = trash_dir(&app)?;
+    let trash = root.join("trash");
     let md_src = trash.join(format!("{id}.md"));
     if !md_src.exists() {
         return Err(format!("nothing to restore for {id}"));
@@ -533,17 +552,26 @@ pub fn restore_pad(app: AppHandle, id: String) -> Result<RestoredPad, String> {
         .ok()
         .and_then(|s| serde_json::from_str::<TrashEntry>(&s).ok())
         .map(|entry| entry.meta)
-        .unwrap_or_else(|| recovered_meta(&id));
-    move_path(&md_src, &pad_path(&app, &id)?)?;
+        .unwrap_or_else(|| recovered_meta(id));
+    move_path(&md_src, &live_md)?;
     move_path(
         &trash.join(format!("{id}.automerge")),
-        &doc_path(&app, &id)?,
+        &pads.join(format!("{id}.automerge")),
     )?;
-    move_path(&trash.join("history").join(&id), &history_dir(&app, &id)?)?;
+    move_path(
+        &trash.join("history").join(id),
+        &root.join("history").join(id),
+    )?;
     let _ = fs::remove_file(trash.join(format!("{id}.json")));
-    let content = read_pad(&app, &id);
-    let doc = read_doc(&app, &id);
+    let content = fs::read_to_string(&live_md).unwrap_or_default();
+    let doc = fs::read(pads.join(format!("{id}.automerge"))).ok();
     Ok(RestoredPad { meta, content, doc })
+}
+
+/// Move a trashed pad's files back and return its meta + content.
+#[tauri::command]
+pub fn restore_pad(app: AppHandle, id: String) -> Result<RestoredPad, String> {
+    restore_pad_in(&workspace_dir(&app)?, &id)
 }
 
 /// Permanently delete a trashed pad.
@@ -611,12 +639,14 @@ pub fn force_snapshot(app: AppHandle, id: String, content: String) -> Result<(),
 //
 // Lets the user relocate the entire workspace into a folder that some external
 // tool (iCloud Drive / Dropbox / Syncthing) keeps in sync across their devices.
-// Because pad writes are atomic AND — since #16 — Automerge-CRDT-merged, two
-// devices editing the same synced folder reconcile instead of clobbering: on
-// each launch the frontend merges any `.automerge` it finds on disk into its
-// in-memory doc, so concurrent edits converge. (Pre-#16 the documented caveat
-// was that the sync tool could produce file-level conflict copies; that is now
-// resolved at the CRDT layer.)
+// Pad writes are atomic, and #16 adds the per-pad Automerge CRDT model that the
+// eventual on-launch reconcile of conflict copies will build on. That reconcile
+// is NOT wired in this PR: `hydrate` loads only the single `.automerge` per pad
+// and `PadDocStore::merge` has no production caller yet, so two devices editing
+// the SAME pad on a synced folder can still clobber at the file level — the
+// sync tool may write a conflict copy and the losing device's unsynced edits are
+// lost until the merge-on-launch step lands in a later issue. Treat the CRDT
+// here as infrastructure for that follow-up, not a live conflict resolver.
 // ---------------------------------------------------------------------------
 
 /// Where the workspace currently lives, and whether it's the default location.
@@ -664,33 +694,85 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Move the workspace to `new_root` and persist the new location.
+/// Resolve a path to an absolute, symlink-free form even when it does not exist
+/// yet: canonicalize the deepest ancestor that *does* exist, then re-append the
+/// not-yet-created trailing components. This collapses `..`, `.`, and symlinks so
+/// the nested-root check below cannot be defeated by an indirect path that
+/// actually points inside (or above) the current workspace.
+fn resolve_existing(path: &Path) -> PathBuf {
+    if let Ok(c) = path.canonicalize() {
+        return c;
+    }
+    let mut ancestor = path;
+    let mut trailing: Vec<&std::ffi::OsStr> = Vec::new();
+    loop {
+        match ancestor.parent() {
+            Some(parent) => {
+                if let Some(name) = ancestor.file_name() {
+                    trailing.push(name);
+                }
+                if let Ok(c) = parent.canonicalize() {
+                    let mut out = c;
+                    for name in trailing.iter().rev() {
+                        out.push(name);
+                    }
+                    return out;
+                }
+                ancestor = parent;
+            }
+            // Reached the filesystem root with nothing canonicalizable; fall back
+            // to the path as given (already absolute or relative as supplied).
+            None => return path.to_path_buf(),
+        }
+    }
+}
+
+/// Whether `a` is the same path as `b` or a (proper or improper) ancestor of it.
+/// Comparison is component-wise on already-resolved paths, so it is not fooled by
+/// a shared textual prefix that isn't a real path boundary (e.g. `…/ws` vs
+/// `…/ws-backup`).
+fn is_ancestor_or_equal(a: &Path, b: &Path) -> bool {
+    b.starts_with(a)
+}
+
+/// Reject a relocation whose destination is the same as, an ancestor of, or a
+/// descendant of the current workspace. Any of these makes the copy→cleanup flow
+/// destroy the just-copied data (the cleanup `remove_dir_all` would delete the
+/// destination along with the source, or the copy would recurse into the growing
+/// destination). Both paths are resolved first so symlinks / `..` can't sneak a
+/// nested path past the check.
+fn reject_nested_relocation(current: &Path, dest: &Path) -> Result<(), String> {
+    let rc = resolve_existing(current);
+    let rd = resolve_existing(dest);
+    if is_ancestor_or_equal(&rc, &rd) || is_ancestor_or_equal(&rd, &rc) {
+        return Err(format!(
+            "{} overlaps the current workspace at {}; choose a separate folder that is neither inside nor a parent of it",
+            dest.display(),
+            current.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Core of [`set_workspace_root`], expressed purely in terms of paths so it is
+/// unit-testable without a Tauri `AppHandle`. Performs the no-data-loss
+/// copy→cleanup. Does NOT touch the persisted config — the caller commits the
+/// new root only after this returns Ok, keeping the operation all-or-nothing
+/// from the user's perspective.
 ///
 /// Safety / no-data-loss contract:
-///   1. Refuse if `new_root` already contains a workspace (`index.json`), so we
-///      never silently merge into or overwrite someone else's data.
-///   2. COPY the current workspace into `new_root` first (source untouched).
-///   3. Only after the copy fully succeeds, point the config at the new root.
+///   0. Refuse if `dest` overlaps `current` (same / ancestor / descendant): such
+///      a move would delete the copied data during cleanup. (fix: nested root)
+///   1. Refuse if `dest` already contains a workspace (`index.json`), so we never
+///      silently merge into or overwrite someone else's data.
+///   2. COPY the current workspace into `dest` first (source untouched).
+///   3. Caller persists the new root only after this returns Ok.
 ///   4. Best-effort remove the old copy. If that fails the data still lives at
 ///      the new (now-active) root, so nothing is lost — only a stale duplicate
 ///      is left behind, which is safe.
-///
-/// If any step before (3) fails, the old workspace remains the active one and
-/// no config change is made: the operation is all-or-nothing from the user's
-/// perspective.
-#[tauri::command]
-pub fn set_workspace_root(app: AppHandle, new_root: String) -> Result<WorkspaceLocation, String> {
-    let new_root = new_root.trim();
-    if new_root.is_empty() {
-        return Err("workspace path is empty".into());
-    }
-    let dest = PathBuf::from(new_root);
-    let current = workspace_dir(&app)?;
-
-    // No-op if it's already the active root.
-    if dest == current {
-        return get_workspace_location(app);
-    }
+fn relocate_workspace(current: &Path, dest: &Path) -> Result<(), String> {
+    // (0) Overlap guard — must run BEFORE any copy/cleanup.
+    reject_nested_relocation(current, dest)?;
 
     // (1) Guard against clobbering existing data at the destination.
     if dest.join("index.json").exists() {
@@ -702,22 +784,50 @@ pub fn set_workspace_root(app: AppHandle, new_root: String) -> Result<WorkspaceL
 
     // (2) Copy the current workspace into the destination (source preserved).
     if current.exists() {
-        copy_tree(&current, &dest)
+        copy_tree(current, dest)
             .map_err(|e| format!("could not copy workspace to {}: {e}", dest.display()))?;
     } else {
-        ensure_dir(&dest)?;
+        ensure_dir(dest)?;
     }
 
-    // (3) Commit the relocation by persisting the new root.
+    // (4) Best-effort cleanup of the old location (data already safe at dest).
+    // `current != dest` is guaranteed by the overlap guard, so this never
+    // removes the destination.
+    if current.exists() {
+        let _ = fs::remove_dir_all(current);
+    }
+    Ok(())
+}
+
+/// Move the workspace to `new_root` and persist the new location.
+///
+/// See [`relocate_workspace`] for the no-data-loss contract. The config is
+/// committed only after the copy fully succeeds, so a failure before that leaves
+/// the old workspace active and unchanged.
+#[tauri::command]
+pub fn set_workspace_root(app: AppHandle, new_root: String) -> Result<WorkspaceLocation, String> {
+    let new_root = new_root.trim();
+    if new_root.is_empty() {
+        return Err("workspace path is empty".into());
+    }
+    let dest = PathBuf::from(new_root);
+    let current = workspace_dir(&app)?;
+
+    // No-op if it's already the active root (resolve both so symlinked/`..`
+    // spellings of the same dir are also treated as a no-op rather than an
+    // overlap error).
+    if resolve_existing(&dest) == resolve_existing(&current) {
+        return get_workspace_location(app);
+    }
+
+    // Perform the guarded copy→cleanup. Nothing is persisted yet.
+    relocate_workspace(&current, &dest)?;
+
+    // Commit the relocation by persisting the new root (only reached on success).
     let cfg = AppConfig {
         workspace_root: Some(dest.to_string_lossy().to_string()),
     };
     write_config(&app, &cfg)?;
-
-    // (4) Best-effort cleanup of the old location (data already safe at dest).
-    if current.exists() && current != dest {
-        let _ = fs::remove_dir_all(&current);
-    }
 
     get_workspace_location(app)
 }
@@ -829,5 +939,202 @@ mod tests {
         // Missing field deserializes to the default (None), never an error.
         let back: AppConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(back.workspace_root, None);
+    }
+
+    // --- set_workspace_root / relocate_workspace (no-data-loss) -------------
+
+    /// Seed a minimal but complete workspace at `root` so a relocate has real
+    /// `.md` + `.automerge` + history + index to move.
+    fn seed_workspace(root: &Path) {
+        atomic_write(&root.join("index.json"), "{\"v\":1}").unwrap();
+        atomic_write(&root.join("pads").join("a.md"), "alpha").unwrap();
+        atomic_write_bytes(&root.join("pads").join("a.automerge"), &[9, 8, 7]).unwrap();
+        atomic_write(&root.join("history").join("a").join("1.md"), "old").unwrap();
+    }
+
+    #[test]
+    fn relocate_rejects_descendant_destination() {
+        // current=…/workspace, dest=…/workspace/sync — the dangerous nested case
+        // that previously copied into a growing dir then deleted the copy.
+        let tmp = TmpDir::new("relocate-nested");
+        let current = tmp.path().join("workspace");
+        seed_workspace(&current);
+        let dest = current.join("sync");
+
+        let err = relocate_workspace(&current, &dest).unwrap_err();
+        assert!(err.contains("overlaps"), "got: {err}");
+        // Source is completely untouched — no data loss, no partial copy.
+        assert_eq!(
+            fs::read_to_string(current.join("pads").join("a.md")).unwrap(),
+            "alpha"
+        );
+        assert!(
+            !dest.exists(),
+            "must not have started copying into the nest"
+        );
+    }
+
+    #[test]
+    fn relocate_rejects_ancestor_destination() {
+        // current=…/parent/workspace, dest=…/parent — moving "up" so the cleanup
+        // would delete the parent containing the freshly-copied data.
+        let tmp = TmpDir::new("relocate-ancestor");
+        let parent = tmp.path().join("parent");
+        let current = parent.join("workspace");
+        seed_workspace(&current);
+
+        let err = relocate_workspace(&current, &parent).unwrap_err();
+        assert!(err.contains("overlaps"), "got: {err}");
+        assert_eq!(
+            fs::read_to_string(current.join("pads").join("a.md")).unwrap(),
+            "alpha"
+        );
+    }
+
+    #[test]
+    fn relocate_rejects_symlinked_descendant() {
+        // A symlink that points back inside the current workspace must not defeat
+        // the overlap guard (paths are resolved before comparison).
+        let tmp = TmpDir::new("relocate-symlink");
+        let current = tmp.path().join("workspace");
+        seed_workspace(&current);
+        // dest = …/link/sub, where `link` -> current. resolve_existing must see
+        // dest is inside current and reject.
+        let link = tmp.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&current, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&current, &link).unwrap();
+        let dest = link.join("sub");
+
+        let err = relocate_workspace(&current, &dest).unwrap_err();
+        assert!(err.contains("overlaps"), "got: {err}");
+        assert_eq!(
+            fs::read_to_string(current.join("pads").join("a.md")).unwrap(),
+            "alpha"
+        );
+    }
+
+    #[test]
+    fn relocate_to_sibling_moves_data_without_loss() {
+        // A normal, separate destination succeeds: all files arrive at dest and
+        // the old location is cleaned up.
+        let tmp = TmpDir::new("relocate-sibling");
+        let current = tmp.path().join("workspace");
+        let dest = tmp.path().join("synced-workspace");
+        seed_workspace(&current);
+
+        relocate_workspace(&current, &dest).unwrap();
+
+        // Every file landed at the destination, byte-for-byte.
+        assert_eq!(
+            fs::read_to_string(dest.join("index.json")).unwrap(),
+            "{\"v\":1}"
+        );
+        assert_eq!(
+            fs::read_to_string(dest.join("pads").join("a.md")).unwrap(),
+            "alpha"
+        );
+        assert_eq!(
+            fs::read(dest.join("pads").join("a.automerge")).unwrap(),
+            vec![9, 8, 7]
+        );
+        assert_eq!(
+            fs::read_to_string(dest.join("history").join("a").join("1.md")).unwrap(),
+            "old"
+        );
+        // Old location removed (best-effort cleanup succeeded here).
+        assert!(!current.exists(), "old workspace should be cleaned up");
+    }
+
+    #[test]
+    fn relocate_into_existing_workspace_is_refused() {
+        // Destination already holds a workspace (index.json) -> refuse, never
+        // merge/overwrite someone else's data.
+        let tmp = TmpDir::new("relocate-existing");
+        let current = tmp.path().join("workspace");
+        let dest = tmp.path().join("other");
+        seed_workspace(&current);
+        atomic_write(&dest.join("index.json"), "{\"theirs\":true}").unwrap();
+
+        let err = relocate_workspace(&current, &dest).unwrap_err();
+        assert!(err.contains("already contains"), "got: {err}");
+        // Their index is untouched and ours still exists.
+        assert_eq!(
+            fs::read_to_string(dest.join("index.json")).unwrap(),
+            "{\"theirs\":true}"
+        );
+        assert!(current.join("index.json").exists());
+    }
+
+    // --- trash / restore with an .automerge present ------------------------
+
+    #[test]
+    fn trash_then_restore_roundtrips_md_and_automerge() {
+        let tmp = TmpDir::new("trash-restore");
+        let root = tmp.path();
+        let pads = root.join("pads");
+        atomic_write(&pads.join("p.md"), "hello world").unwrap();
+        let doc_bytes: Vec<u8> = vec![0, 1, 2, 3, 250, 255];
+        atomic_write_bytes(&pads.join("p.automerge"), &doc_bytes).unwrap();
+        atomic_write(&root.join("history").join("p").join("100.md"), "v1").unwrap();
+
+        let meta = PadMeta {
+            id: "p".into(),
+            title: "Pad".into(),
+            color: "amber".into(),
+            order: 0,
+            created_at: 1,
+            updated_at: 2,
+        };
+
+        // Trash: live files move into trash/, including the .automerge.
+        trash_pad_in(root, meta.clone()).unwrap();
+        assert!(!pads.join("p.md").exists());
+        assert!(!pads.join("p.automerge").exists());
+        assert!(root.join("trash").join("p.md").exists());
+        assert!(root.join("trash").join("p.automerge").exists());
+        assert!(root
+            .join("trash")
+            .join("history")
+            .join("p")
+            .join("100.md")
+            .exists());
+
+        // Restore: everything comes back, and the .automerge bytes are returned
+        // exactly so the CRDT history is preserved (not just the latest text).
+        let restored = restore_pad_in(root, "p").unwrap();
+        assert_eq!(restored.content, "hello world");
+        assert_eq!(restored.meta.id, "p");
+        assert_eq!(restored.meta.title, "Pad");
+        assert_eq!(restored.doc, Some(doc_bytes));
+        assert!(pads.join("p.md").exists());
+        assert!(pads.join("p.automerge").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("history").join("p").join("100.md")).unwrap(),
+            "v1"
+        );
+        // Trash is emptied of this pad's artifacts.
+        assert!(!root.join("trash").join("p.md").exists());
+        assert!(!root.join("trash").join("p.automerge").exists());
+        assert!(!root.join("trash").join("p.json").exists());
+    }
+
+    #[test]
+    fn restore_refuses_to_clobber_a_live_pad() {
+        let tmp = TmpDir::new("restore-clobber");
+        let root = tmp.path();
+        // A trashed copy exists...
+        atomic_write(&root.join("trash").join("p.md"), "trashed").unwrap();
+        // ...but a live pad with the same id is present.
+        atomic_write(&root.join("pads").join("p.md"), "live").unwrap();
+
+        let err = restore_pad_in(root, "p").unwrap_err();
+        assert!(err.contains("already exists"), "got: {err}");
+        // The live pad is untouched.
+        assert_eq!(
+            fs::read_to_string(root.join("pads").join("p.md")).unwrap(),
+            "live"
+        );
     }
 }

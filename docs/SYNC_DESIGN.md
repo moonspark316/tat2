@@ -101,19 +101,22 @@ directory at an existing synced folder (iCloud Drive / Dropbox / Syncthing).
 
 - Add a configurable workspace root (stored outside the workspace, e.g.
   `app_config_dir/config.json`), with a guided "move my data" flow.
-- Because writes are atomic and—once #16 lands—CRDT-merged, two devices editing
-  the same synced folder reconcile instead of fighting.
+- Pad writes are atomic, and #16 lands the per-pad Automerge CRDT model. That
+  model is the **infrastructure** for an eventual on-launch reconcile of
+  synced-folder conflict copies — it is **not yet wired** as a live conflict
+  resolver in this iteration.
 
-> **Caveat resolved (#16 has landed):** the pre-#16 risk was that simultaneous
-> edits to the *same pad* on two devices could conflict at the file level and
-> the synced-folder tool might create conflict copies. Now that each pad is an
-> Automerge doc, on every launch the frontend merges any `.automerge` it finds
-> on disk into its in-memory doc (`PadDocStore.merge`), so concurrent edits
-> converge per-character and the `.md` mirror is rewritten from the converged
-> text. A synced-folder conflict copy of a `.automerge` is itself just another
-> set of changes that merges cleanly. (Live cross-device propagation while both
-> apps are open still waits on the relay, #17/#18; the stop-gap reconciles at
-> launch / on reload.)
+> **Caveat still applies (CRDT reconcile not yet wired):** the on-launch merge of
+> conflict copies is infrastructure for a later issue, not shipping here.
+> Concretely, `PadDocStore.hydrate` loads only the single `<id>.automerge` per
+> pad and `PadDocStore.merge` has **no production caller** — nothing scans for or
+> folds in a synced-folder conflict copy on launch. So the pre-#16 risk stands:
+> simultaneous edits to the *same pad* on two devices conflict at the file level,
+> the synced-folder tool may create a conflict copy, and the **losing device's
+> unsynced edits can be lost** when the tool clobbers the file. Resolving this —
+> discovering conflict copies and merging them via `PadDocStore.merge` on launch
+> — is a follow-up issue, and live cross-device propagation while both apps are
+> open still waits on the relay (#17/#18).
 
 Backend implemented in this iteration: a workspace root configurable via
 `get_workspace_location` / `set_workspace_root` / `clear_workspace_root`

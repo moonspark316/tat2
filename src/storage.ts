@@ -123,6 +123,23 @@ export class AutoSaver {
     );
   }
 
+  /** Append `task` to a pad's serialized write chain so it never overlaps or
+   *  races another write to the same `<id>.md`/`.automerge`. The returned promise
+   *  resolves when `task` (after any prior write) has finished. */
+  private chain(id: string, task: () => Promise<void>): Promise<void> {
+    const prior = this.inflight.get(id);
+    const run = (async () => {
+      // Preserve write ordering: never start before the previous write finishes.
+      if (prior) await prior.catch(() => {});
+      await task();
+    })();
+    this.inflight.set(id, run);
+    void run.finally(() => {
+      if (this.inflight.get(id) === run) this.inflight.delete(id);
+    });
+    return run;
+  }
+
   private flushOne(id: string): Promise<void> {
     const timer = this.timers.get(id);
     if (timer) clearTimeout(timer);
@@ -132,10 +149,7 @@ export class AutoSaver {
     if (content === undefined) return this.inflight.get(id) ?? Promise.resolve();
     this.pending.delete(id);
 
-    const prior = this.inflight.get(id);
-    const run = (async () => {
-      // Preserve write ordering: never start before the previous write finishes.
-      if (prior) await prior.catch(() => {});
+    return this.chain(id, async () => {
       try {
         await this.persist(id, content);
       } catch (err) {
@@ -143,12 +157,17 @@ export class AutoSaver {
         console.error("autosave retry", err);
         this.queue(id, content);
       }
-    })();
-    this.inflight.set(id, run);
-    void run.finally(() => {
-      if (this.inflight.get(id) === run) this.inflight.delete(id);
     });
-    return run;
+  }
+
+  /**
+   * Run a one-off persist for a pad on the SAME per-id serialized chain the
+   * debounced saves use, so a migration / seed write can't race a fast first
+   * keystroke's write to the same `<id>` files. Stays invisible: failures throw
+   * to the caller rather than surfacing any save indicator.
+   */
+  enqueue(id: string, task: () => Promise<void>): Promise<void> {
+    return this.chain(id, task);
   }
 
   /** Drop any QUEUED (not-yet-started) write for a pad. Does not abort an
