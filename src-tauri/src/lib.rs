@@ -26,18 +26,36 @@ const WINDOW_LABEL: &str = "main";
 /// Event the frontend listens for to flush pending writes before the app quits.
 const BEFORE_QUIT_EVENT: &str = "tat2://before-quit";
 
-/// Place the popover just under the menu bar, horizontally centered on the
-/// tray icon (falling back to the top-right corner of the primary display).
+/// Place the popover just under the menu bar on the display the user is
+/// currently on.
+///
+/// Multi-display anchoring (all coordinates are global physical px, top-left
+/// origin — the space `set_position` uses):
+///
+/// - The **target monitor** is the one under the OS cursor. When the user
+///   clicks the tray icon the cursor sits over that display's menu bar, and
+///   when summoning via the global shortcut it sits on whatever display the
+///   user is working on — so this single signal anchors us on the right screen
+///   in both cases (and when the menu bar lives on a non-primary display).
+///   Falls back to the window's current/primary monitor.
+/// - The **x anchor** centers under the tray icon when the last tray click lies
+///   on the target monitor; otherwise it centers on the cursor, so a shortcut
+///   summon still appears under the user's pointer rather than on a stale
+///   display. Final fallback is the monitor's top-right corner.
+///
+/// The result is clamped to keep the window fully on the target monitor.
 fn position_window(app: &tauri::AppHandle) {
     let Some(win) = app.get_webview_window(WINDOW_LABEL) else {
         return;
     };
     let anchor_x = *app.state::<TrayAnchor>().0.lock().unwrap();
+    let cursor = app.cursor_position().ok();
 
-    let monitor = win
-        .current_monitor()
-        .ok()
-        .flatten()
+    // Pick the display the user is on (cursor), else where the window already
+    // is, else the primary display.
+    let monitor = cursor
+        .and_then(|c| app.monitor_from_point(c.x, c.y).ok().flatten())
+        .or_else(|| win.current_monitor().ok().flatten())
         .or_else(|| win.primary_monitor().ok().flatten());
 
     let win_w = win.outer_size().map(|s| s.width as f64).unwrap_or(420.0);
@@ -52,9 +70,16 @@ fn position_window(app: &tauri::AppHandle) {
         None => (0.0, 0.0, 1440.0, 1.0),
     };
 
+    // Only trust the tray-click x if it falls on the chosen monitor; otherwise
+    // it belongs to a different display (stale shortcut summon).
+    let anchor_on_monitor = anchor_x.filter(|cx| *cx >= mon_x && *cx <= mon_x + mon_w);
+    let cursor_x_on_monitor = cursor
+        .map(|c| c.x)
+        .filter(|cx| *cx >= mon_x && *cx <= mon_x + mon_w);
+
     // A few px below the macOS menu bar / Windows tray area.
     let y = mon_y + 34.0 * scale;
-    let x = match anchor_x {
+    let x = match anchor_on_monitor.or(cursor_x_on_monitor) {
         Some(cx) => cx - win_w / 2.0,
         None => mon_x + mon_w - win_w - 12.0 * scale,
     };
@@ -66,11 +91,69 @@ fn position_window(app: &tauri::AppHandle) {
     let _ = win.set_position(PhysicalPosition::new(x as i32, y as i32));
 }
 
+/// Force the popover to the front of the **active Space** and grab keyboard
+/// focus, even though Tat2 runs as an `Accessory` app (no dock icon).
+///
+/// Why this is needed: an `Accessory` app is not the active application, so
+/// `NSWindow::makeKeyAndOrderFront:` (what Tauri's `set_focus` issues) can order
+/// the window forward without it ever becoming *key* — the user would have to
+/// click before typing. Real menu-bar utilities work around this by explicitly
+/// activating the app. We do the same, in order:
+///
+/// - `NSApplication::activateIgnoringOtherApps(true)` makes Tat2 the active app
+///   regardless of who is focused, so its window can legitimately take keyboard
+///   focus. (The modern `activate` is best-effort and may no-op unless the other
+///   app yields — unacceptable for a summon-and-type tool, so we use the
+///   still-functional `IgnoringOtherApps` variant.)
+/// - `makeKeyAndOrderFront:` + `orderFrontRegardless()` make it key and surface
+///   it above full-screen Spaces (paired with the `canJoinAllSpaces |
+///   fullScreenAuxiliary` collection behavior set at setup — see
+///   `set_visible_on_all_workspaces`).
+///
+/// This does **not** touch the activation policy, so the no-dock-icon invariant
+/// is preserved. No-op off the main thread (we are always on it here).
+#[cfg(target_os = "macos")]
+fn focus_app_macos(win: &tauri::WebviewWindow) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSApplication, NSWindow};
+    use objc2_foundation::MainThreadMarker;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Ok(ns_window_ptr) = win.ns_window() else {
+        return;
+    };
+    if ns_window_ptr.is_null() {
+        return;
+    }
+
+    // SAFETY: `ns_window()` hands us an autoreleased pointer to the window's
+    // live `NSWindow`. We retain it for the duration of these calls and only
+    // invoke standard AppKit methods on the main thread.
+    unsafe {
+        let app = NSApplication::sharedApplication(mtm);
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+
+        let ns_window: Retained<NSWindow> =
+            Retained::retain(ns_window_ptr.cast()).expect("non-null NSWindow");
+        ns_window.makeKeyAndOrderFront(None);
+        ns_window.orderFrontRegardless();
+    }
+}
+
+/// Summon the popover: position it on the user's current display, show it, and
+/// grab keyboard focus. Idempotent — safe to call while already visible or in
+/// rapid succession (re-anchors and re-focuses without flicker).
 fn show_window(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
         position_window(app);
         let _ = win.show();
+        // `set_focus` is a no-op until the window is visible, hence after show.
         let _ = win.set_focus();
+        #[cfg(target_os = "macos")]
+        focus_app_macos(&win);
     }
 }
 
