@@ -19,6 +19,11 @@ export function RevisionBrowser({
   const [revisions, setRevisions] = useState<number[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [revContent, setRevContent] = useState("");
+  // Which revision `revContent` actually belongs to. `null` means "nothing
+  // loaded yet" (or a load is in flight). Restore is gated on this matching
+  // `selected` so a fast click can never write a stale/previous revision's
+  // content while the newly-selected one is still loading (#55, #62).
+  const [loadedFor, setLoadedFor] = useState<number | null>(null);
   const [mode, setMode] = useState<"preview" | "diff">("diff");
   const now = useMemo(() => Date.now(), []);
 
@@ -45,11 +50,18 @@ export function RevisionBrowser({
   useEffect(() => {
     if (selected === null) {
       setRevContent("");
+      setLoadedFor(null);
       return;
     }
     let alive = true;
-    readRevision(padId, selected).then((c) => {
-      if (alive) setRevContent(c);
+    // Mark as "loading" so Restore is disabled until the content for THIS
+    // revision actually arrives (and a superseded load can't re-enable it).
+    setLoadedFor(null);
+    const target = selected;
+    readRevision(padId, target).then((c) => {
+      if (!alive) return;
+      setRevContent(c);
+      setLoadedFor(target);
     });
     return () => {
       alive = false;
@@ -101,8 +113,14 @@ export function RevisionBrowser({
             </div>
             <div className="rev-actions">
               <button
-                disabled={selected === null}
+                // Only enabled once the loaded content matches the selected
+                // revision — never while a load is in flight (#55, #62).
+                disabled={selected === null || loadedFor !== selected}
                 onClick={() => {
+                  // Guard the actual write too: if the loaded content doesn't
+                  // belong to the selected revision, do nothing rather than
+                  // restore stale/empty content.
+                  if (selected === null || loadedFor !== selected) return;
                   void Promise.resolve(onRestore(revContent)).then(onClose);
                 }}
                 title="Replace current content with this revision (current is snapshotted first)"

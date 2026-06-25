@@ -24,6 +24,31 @@ describe("findMatches", () => {
     const [m] = findMatches(text, "quick");
     expect(text.slice(m.start, m.end)).toBe("quick");
   });
+
+  it("keeps offsets in original-text space when lowercase changes length (#18)", () => {
+    // "İ" (U+0130) lowercases to two UTF-16 units ("i" + combining dot).
+    // A naive indexOf into text.toLowerCase() would mis-place every later hit.
+    const text = "İ then foo";
+    const [m] = findMatches(text, "foo");
+    expect(text.slice(m.start, m.end)).toBe("foo");
+  });
+
+  it("matches a query against text whose case differs in length (#18)", () => {
+    // The uppercase "İ" should match the lowercase query "i̇" at offset 0,
+    // spanning exactly the single original code unit.
+    const text = "İstanbul";
+    const [m] = findMatches(text, "i̇");
+    expect(m).toBeDefined();
+    expect(m.start).toBe(0);
+    expect(text.slice(m.start, m.end)).toBe("İ");
+  });
+
+  it("finds multiple non-overlapping matches around length-changing chars", () => {
+    const text = "foo İ foo";
+    const ms = findMatches(text, "foo");
+    expect(ms).toHaveLength(2);
+    for (const m of ms) expect(text.slice(m.start, m.end)).toBe("foo");
+  });
 });
 
 const pad = (id: string, color: PadMeta["color"]): PadMeta => ({
@@ -69,5 +94,23 @@ describe("searchAllPads", () => {
     const content = Array.from({ length: 50 }, () => "x").join("\n");
     const hits = searchAllPads([pad("a", "amber")], { a: content }, "x", 10);
     expect(hits).toHaveLength(10);
+  });
+
+  it("offsets stay correct after a length-changing char earlier in the line (#18)", () => {
+    // The "İ" lowercases to two units; the hit offset must point at the match
+    // in the ORIGINAL content, not the lowercased one.
+    const content = "İ prefix needle";
+    const [hit] = searchAllPads([pad("a", "teal")], { a: content }, "needle");
+    expect(hit).toBeDefined();
+    expect(content.slice(hit.offset, hit.offset + hit.length)).toBe("needle");
+  });
+
+  it("reports the matched length, not the query length (#30)", () => {
+    // Query "i̇" (2 units) matches the single-unit "İ" — length must be 1.
+    const content = "İstanbul";
+    const [hit] = searchAllPads([pad("a", "blue")], { a: content }, "i̇");
+    expect(hit).toBeDefined();
+    expect(hit.length).toBe(1);
+    expect(content.slice(hit.offset, hit.offset + hit.length)).toBe("İ");
   });
 });

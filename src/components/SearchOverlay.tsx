@@ -35,7 +35,10 @@ export function SearchOverlay({
 
   const jump = (i: number) => {
     const h = hits[i];
-    if (h) onJump(h.padId, h.offset, query.length);
+    // Use the hit's own matched length, not `query.length`: lowercasing isn't
+    // always length-preserving, so the highlighted span must come from the
+    // match itself or it would be misaligned in the editor (#30).
+    if (h) onJump(h.padId, h.offset, h.length);
   };
 
   return (
