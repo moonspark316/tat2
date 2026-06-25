@@ -243,6 +243,7 @@ export class AutoSaver {
    */
   enqueue(id: string, task: () => Promise<void>): Promise<void> {
     return this.chain(id, task);
+  }
 
   /** Interruptible sleep used between retry attempts. Resolves early (so the
    *  retry loop re-checks its abort flag and bails) when cancel()/idle() fire. */
