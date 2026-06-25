@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { computeStats, firstLine, padLabel, formatRevision } from "./text";
+import {
+  computeStats,
+  firstLine,
+  padLabel,
+  formatRevision,
+  hasExplicitTitle,
+  DEFAULT_PAD_TITLE,
+} from "./text";
 
 describe("computeStats", () => {
   it("counts an empty document as all zeros", () => {
@@ -39,6 +46,25 @@ describe("firstLine", () => {
     expect(firstLine("\n\n  hello there  \nmore")).toBe("hello there");
     expect(firstLine("x".repeat(100)).length).toBe(40);
   });
+
+  it("caps on code points so a surrogate pair is never split (#26)", () => {
+    // 50 astral-plane emoji; the old code-unit slice(0,40) would cut one in
+    // half and emit a "�" replacement char. Code-point capping keeps 40 whole.
+    const emoji = "😀";
+    const out = firstLine(emoji.repeat(50));
+    expect(out).not.toContain("�");
+    expect(Array.from(out)).toHaveLength(40);
+    expect(out).toBe(emoji.repeat(40));
+  });
+
+  it("does not split a surrogate pair sitting on the boundary (#26)", () => {
+    // 39 single-unit chars + emoji => emoji starts at code unit 39 and would be
+    // split by slice(0, 40). Code-point capping keeps it whole (41st code unit
+    // dropped is fine because only 40 code points are kept).
+    const out = firstLine("x".repeat(39) + "😀tail");
+    expect(out).not.toContain("�");
+    expect(Array.from(out)).toHaveLength(40);
+  });
 });
 
 describe("padLabel", () => {
@@ -49,6 +75,30 @@ describe("padLabel", () => {
   it("falls back to the first line for default/empty titles", () => {
     expect(padLabel("Sketchpad", "first line\nsecond")).toBe("first line");
     expect(padLabel("", "first line")).toBe("first line");
+  });
+
+  it("shows an explicit title even when it equals the first line (#25)", () => {
+    // A user-chosen title that happens to match the first content line must
+    // still display as the explicit title, not be treated as auto-derived.
+    expect(padLabel("first line", "first line\nsecond")).toBe("first line");
+  });
+
+  it("treats whitespace-only titles as unset", () => {
+    expect(padLabel("   ", "first line")).toBe("first line");
+  });
+});
+
+describe("hasExplicitTitle", () => {
+  it("is false for the default placeholder, empty, and whitespace", () => {
+    expect(hasExplicitTitle(DEFAULT_PAD_TITLE)).toBe(false);
+    expect(hasExplicitTitle("")).toBe(false);
+    expect(hasExplicitTitle("   ")).toBe(false);
+  });
+
+  it("is true for any other user-chosen title", () => {
+    expect(hasExplicitTitle("My notes")).toBe(true);
+    // Even one that coincides with what a first-line label would produce.
+    expect(hasExplicitTitle("first line")).toBe(true);
   });
 });
 

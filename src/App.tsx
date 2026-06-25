@@ -28,6 +28,7 @@ import {
   setShortcut,
 } from "./storage";
 import { defaultShortcut } from "./lib/shortcut";
+import { hasExplicitTitle } from "./lib/text";
 import "./App.css";
 
 const BEFORE_QUIT_EVENT = "tat2://before-quit";
@@ -126,50 +127,91 @@ export default function App() {
     if (!showFind && modal === "none") textareaRef.current?.focus();
   }, [ws.activeId, showFind, modal]);
 
-  /** Scroll a range into view + highlight it WITHOUT stealing focus (find). */
-  const revealRange = useCallback((start: number, end: number) => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.setSelectionRange(start, end);
-    const line = ta.value.slice(0, start).split("\n").length - 1;
-    const lh = parseFloat(getComputedStyle(ta).lineHeight);
-    const lineHeight = Number.isFinite(lh) ? lh : 22;
-    ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight / 2);
-  }, []);
+  // Whether the queued pending selection should also focus the editor. Find
+  // reveals without taking focus; cross-pad/preview jumps focus the caret.
+  const pendingFocus = useRef(false);
+
+  /** Apply a selection to the live textarea (no-op if it isn't mounted). */
+  const applySelection = useCallback(
+    (start: number, end: number, focus: boolean) => {
+      const ta = textareaRef.current;
+      if (!ta) return false;
+      ta.setSelectionRange(start, end);
+      const line = ta.value.slice(0, start).split("\n").length - 1;
+      const lh = parseFloat(getComputedStyle(ta).lineHeight);
+      const lineHeight = Number.isFinite(lh) ? lh : 22;
+      ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight / 2);
+      if (focus) ta.focus();
+      return true;
+    },
+    [],
+  );
+
+  /**
+   * Reveal a range, switching OUT of Markdown preview if needed. In preview
+   * there is no textarea to scroll/select, so a "jump to match" would silently
+   * do nothing (#24, #54). We leave preview and queue the selection to be
+   * applied once the editor mounts.
+   */
+  const revealRange = useCallback(
+    (start: number, end: number, focus = false) => {
+      if (applySelection(start, end, focus)) return;
+      pendingSelect.current = { start, end };
+      pendingFocus.current = focus;
+      setPreview(false);
+    },
+    [applySelection],
+  );
 
   /** Move the editor caret to a range and focus it (cross-pad jump). */
   const selectRange = useCallback(
     (start: number, end: number) => {
-      revealRange(start, end);
-      textareaRef.current?.focus();
+      revealRange(start, end, true);
     },
     [revealRange],
   );
 
-  // ---- Apply a pending selection after switching pads (cross-pad jump) ----
+  // ---- Apply a pending selection once the editor is available ----
+  // Fires after a cross-pad switch OR after leaving preview (#54): both can
+  // mean the textarea wasn't mounted when the jump was requested.
   useEffect(() => {
-    if (!pendingSelect.current) return;
+    if (!pendingSelect.current || preview) return;
     const { start, end } = pendingSelect.current;
+    const focus = pendingFocus.current;
     pendingSelect.current = null;
-    requestAnimationFrame(() => selectRange(start, end));
-  }, [ws.activeId, selectRange]);
+    pendingFocus.current = false;
+    requestAnimationFrame(() => applySelection(start, end, focus));
+  }, [ws.activeId, preview, applySelection]);
 
   // ---- Global keyboard shortcuts (subscribed once) ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Chrome inputs (rename, settings, find, search) handle their own keys.
-      // The main editor is a <textarea>, so shortcuts still work while typing.
-      if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
+      // Chrome inputs (rename, settings, find, search) are <input>s that handle
+      // their own keys. The main editor is a <textarea>, so the Cmd-shortcuts
+      // below still work while typing in it.
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT") return;
 
       if (e.key === "Escape") {
-        e.preventDefault();
+        // Don't hijack Escape mid-IME-composition: it's the native way to
+        // cancel/commit a composition in a textarea, and stealing it would
+        // swallow that text behavior (#29).
+        if (e.isComposing) return;
         // Close the find bar first (it floats over an overlay-free editor),
-        // then any open overlay, then hide the popover.
+        // then any open overlay, then hide the popover. Only preventDefault for
+        // the branch we actually handle so we don't suppress native behavior
+        // (e.g. clearing a textarea selection) when there's nothing to close.
         if (showFindRef.current) {
+          e.preventDefault();
           setShowFind(false);
           textareaRef.current?.focus();
-        } else if (modalRef.current !== "none") setModal("none");
-        else void hidePopover();
+        } else if (modalRef.current !== "none") {
+          e.preventDefault();
+          setModal("none");
+        } else {
+          e.preventDefault();
+          void hidePopover();
+        }
         return;
       }
       const mod = e.metaKey || e.ctrlKey;
@@ -232,10 +274,9 @@ export default function App() {
   // then restore the user's pin preference afterwards.
   const handleExport = async () => {
     if (!ws.activePad) return;
-    const raw =
-      ws.activePad.title && ws.activePad.title !== "Sketchpad"
-        ? ws.activePad.title
-        : "sketchpad";
+    const raw = hasExplicitTitle(ws.activePad.title)
+      ? ws.activePad.title
+      : "sketchpad";
     const name = raw.replace(/[^\w.-]+/g, "_") || "sketchpad";
     // Persist the latest keystrokes first — export reads from disk.
     await ws.flush();
@@ -294,7 +335,11 @@ export default function App() {
     if (padId === ws.activeId) {
       selectRange(offset, offset + length);
     } else {
+      // Queue the selection; the pending-selection effect applies it once the
+      // target pad's editor mounts (and after leaving preview, if active).
       pendingSelect.current = { start: offset, end: offset + length };
+      pendingFocus.current = true;
+      if (preview) setPreview(false);
       ws.switchPad(padId);
     }
   };

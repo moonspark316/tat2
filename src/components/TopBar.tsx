@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PadMeta } from "../types";
 import { swatch } from "../palette";
-import { padLabel } from "../lib/text";
+import { DEFAULT_PAD_TITLE, hasExplicitTitle, padLabel } from "../lib/text";
 
 interface TopBarProps {
   pads: PadMeta[];
@@ -47,11 +47,17 @@ export function TopBar({
 
   const startRename = (p: PadMeta) => {
     setRenamingId(p.id);
-    setDraft(p.title === "Sketchpad" ? "" : p.title);
+    // Seed the field with the existing explicit title (so the user edits it);
+    // leave it blank for an untitled pad so they start from the placeholder.
+    setDraft(hasExplicitTitle(p.title) ? p.title : "");
   };
 
   const commitRename = () => {
-    if (renamingId) onRename(renamingId, draft.trim() || "Sketchpad");
+    // An empty field clears back to the default (auto first-line label); any
+    // non-empty value is kept verbatim as an explicit title — even if it equals
+    // the pad's first content line — so the user's choice persists distinctly
+    // rather than collapsing into the auto-derived label (#25).
+    if (renamingId) onRename(renamingId, draft.trim() || DEFAULT_PAD_TITLE);
     setRenamingId(null);
   };
 

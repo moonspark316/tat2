@@ -33,7 +33,13 @@ export function FindBar({ content, focusSignal, onSelect, onClose }: FindBarProp
 
   const go = (delta: number) => {
     if (matches.length === 0) return;
-    const idx = (current + delta + matches.length) % matches.length;
+    // Clamp the (possibly stale) current index into the CURRENT match list
+    // before stepping. The pad content can shrink while Find is open — leaving
+    // `current` past the new end (#19) — or a query change can grow the list
+    // with `current` captured stale (#23). Without this clamp the modulo steps
+    // from a bogus base and jumps to an unexpected match.
+    const base = Math.min(Math.max(current, 0), matches.length - 1);
+    const idx = (base + delta + matches.length) % matches.length;
     setCurrent(idx);
     const m = matches[idx];
     onSelect(m.start, m.end);
