@@ -7,7 +7,6 @@ import {
   loadWorkspace,
   restorePad,
   saveIndex,
-  savePadDocNow,
   trashPad,
 } from "../storage";
 import { PadDocStore } from "../automerge/store";
@@ -15,6 +14,37 @@ import { PadDocStore } from "../automerge/store";
 /** Collision-proof pad id (timestamp + random suffix). */
 function newPadId(): string {
   return `pad-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Pure index transitions.
+//
+// These are deliberately pure (latest `Index` in -> next `Index` out) so the
+// mutating callbacks below can apply them inside a *functional* `setIndex`
+// updater, against whatever the LATEST index is at commit time — never a stale
+// `index` captured before an `await`. That captured-then-written-back-stale
+// pattern was the shared root cause of #59/#60/#61 (a concurrent edit/add/remove
+// that landed during an await was silently dropped). Keeping them pure also
+// makes the data-loss-relevant logic unit-testable without mounting React.
+// ---------------------------------------------------------------------------
+
+/** Append `pad` to the workspace and make it active, re-deriving `order` from
+ *  the latest pad count so it lands at the end even if pads changed mid-await. */
+export function appendActivePad(index: Index, pad: PadMeta): Index {
+  const next: PadMeta = { ...pad, order: index.pads.length };
+  return { ...index, pads: [...index.pads, next], activePadId: next.id };
+}
+
+/** Remove pad `id` from the workspace. If it was active, fall back to the first
+ *  remaining pad; otherwise keep the latest active selection (which may have
+ *  changed during an in-flight trash — the #60 stale-activeId fix). Returns the
+ *  unchanged index when `id` isn't present so a double-remove is a no-op. */
+export function removePadFromIndex(index: Index, id: string): Index {
+  if (!index.pads.some((p) => p.id === id)) return index;
+  const pads = index.pads.filter((p) => p.id !== id);
+  const activePadId =
+    index.activePadId === id ? (pads[0]?.id ?? null) : index.activePadId;
+  return { ...index, pads, activePadId };
 }
 
 /**
@@ -73,6 +103,27 @@ export function useWorkspace() {
     setIndex(next);
     void saveIndex(next);
   }, []);
+
+  /**
+   * Apply a pure transition against the LATEST index and persist the result.
+   *
+   * Unlike `persistIndex(next)` — which writes back a concrete index value the
+   * caller computed earlier — this re-snapshots inside the `setIndex` updater,
+   * so a transition issued after an `await` never clobbers edits/adds/removes
+   * that landed during that await (#59/#60/#61). The transition must be pure;
+   * the single persist side-effect runs once on the value actually committed.
+   */
+  const persistIndexUpdate = useCallback(
+    (transition: (prev: Index) => Index) => {
+      setIndex((prev) => {
+        if (!prev) return prev;
+        const next = transition(prev);
+        if (next !== prev) void saveIndex(next);
+        return next;
+      });
+    },
+    [],
+  );
 
   const edit = useCallback(
     (value: string) => {
@@ -138,10 +189,16 @@ export function useWorkspace() {
     };
     setContents((c) => ({ ...c, [id]: "" }));
     store.current.ensure(id, "");
-    const bytes = store.current.bytes(id);
-    if (bytes) void savePadDocNow(id, bytes, "");
-    persistIndex({ ...index, pads: [...index.pads, pad], activePadId: id });
-  }, [index, persistIndex]);
+    // Route the initial content write through the AutoSaver's per-id serialized
+    // chain (#58) instead of a fire-and-forget `savePadDocNow`: it is then
+    // strictly ordered before any first-keystroke save to the same `<id>` files
+    // (so the two can't race on the temp files), and its promise surfaces a
+    // failure to the caller's `.catch` rather than being silently swallowed.
+    void saver.current
+      .enqueue(id, () => store.current.persistFn(id, ""))
+      .catch((err) => console.error("addPad persist", err));
+    persistIndexUpdate((prev) => appendActivePad(prev, pad));
+  }, [index, persistIndexUpdate]);
 
   const removePad = useCallback(
     async (id: string) => {
@@ -155,23 +212,28 @@ export function useWorkspace() {
       await saver.current.idle(id); // let any in-flight save finish first
       try {
         // Persist the latest content into the CRDT + `.md` so the trashed copy
-        // (both files) is complete, then move it to trash.
-        await store.current.persistFn(id, contents[id] ?? "");
+        // (both files) is complete, then move it to trash. Read the freshest
+        // content from the store (not a `contents` snapshot captured before the
+        // awaits) so an edit that landed mid-trash is included in the copy.
+        await store.current.persistFn(id, store.current.text(id));
         await trashPad(meta); // soft-delete: recoverable from Trash
       } catch (err) {
         console.error("trash failed; keeping pad", err);
         return;
       }
       store.current.forget(id);
-      const remaining = index.pads.filter((p) => p.id !== id);
-      const nextActive = activeId === id ? (remaining[0]?.id ?? null) : activeId;
       setContents((c) => {
         const { [id]: _drop, ...rest } = c;
         return rest;
       });
-      persistIndex({ ...index, pads: remaining, activePadId: nextActive });
+      // Re-snapshot the LATEST index inside the updater: if the user switched
+      // pads or added/removed another pad during the awaits above, removing this
+      // one must not write back a stale index (dropping those changes) nor a
+      // stale active selection (#60/#61). `removePadFromIndex` re-derives the
+      // active pad from whatever is current.
+      persistIndexUpdate((prev) => removePadFromIndex(prev, id));
     },
-    [index, activeId, contents, persistIndex],
+    [index, persistIndexUpdate],
   );
 
   /** Bring a trashed pad back into the workspace. */
@@ -184,15 +246,19 @@ export function useWorkspace() {
       // else seed a fresh doc from the recovered `.md` text.
       if (doc && doc.length > 0) store.current.adoptBytes(id, doc);
       else store.current.ensure(id, content);
-      const restored: PadMeta = { ...meta, order: index.pads.length };
       setContents((c) => ({ ...c, [id]: content }));
-      persistIndex({
-        ...index,
-        pads: [...index.pads, restored],
-        activePadId: id,
-      });
+      // Append against the LATEST index inside the updater, never the `index`
+      // captured before the `await restorePad` above: pads created or removed
+      // while the restore was in flight would otherwise be dropped, and the
+      // restored pad's `order` would be stale (#59/#61). Guard again here in
+      // case the same id was concurrently re-added.
+      persistIndexUpdate((prev) =>
+        prev.pads.some((p) => p.id === id)
+          ? prev
+          : appendActivePad(prev, { ...meta }),
+      );
     },
-    [index, persistIndex],
+    [index, persistIndexUpdate],
   );
 
   const renamePad = useCallback(
@@ -263,11 +329,16 @@ export function useWorkspace() {
       };
       setContents((c) => ({ ...c, [id]: content }));
       store.current.ensure(id, content);
-      const bytes = store.current.bytes(id);
-      if (bytes) void savePadDocNow(id, bytes, store.current.text(id));
-      persistIndex({ ...index, pads: [...index.pads, pad], activePadId: id });
+      // Serialized initial write (#58): enqueue on the per-id chain so the
+      // imported content's `.automerge`/`.md` is ordered before any first edit
+      // and its failure surfaces to `.catch` — never a fire-and-forget
+      // `savePadDocNow` that could race the first keystroke or swallow an error.
+      void saver.current
+        .enqueue(id, () => store.current.persistFn(id, store.current.text(id)))
+        .catch((err) => console.error("importPad persist", err));
+      persistIndexUpdate((prev) => appendActivePad(prev, pad));
     },
-    [index, persistIndex],
+    [index, persistIndexUpdate],
   );
 
   /** Replace the active pad's content (e.g. restoring a revision), snapshotting
