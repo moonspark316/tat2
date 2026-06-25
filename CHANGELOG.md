@@ -3,6 +3,38 @@
 All notable changes to Tat2 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-06-25
+
+Feature release on top of the MVP, plus a major data-integrity hardening pass
+and the move to open source.
+
+### Added
+- **Offline sync core (#16/#21/#20):** each pad is now an Automerge (CRDT)
+  document mirrored to its `.md`, with a conflict-free merge test suite and a
+  synced-folder (iCloud/Dropbox/Syncthing) stop-gap backend. Migration from
+  plain `.md` is non-destructive.
+- **Quiet auto-update (#36):** `tauri-plugin-updater` wired with a background
+  check and a single unobtrusive "Update ready — restart" pill (no nagging).
+- **Brandable app icon** — an ink "t" mark replacing the placeholder.
+- **Reliable macOS focus (#9):** the popover comes to front on the active
+  Space/display and grabs keyboard focus every time.
+- Paper surface + pad-colored glow visual pass; redesigned add-pad button.
+- Open-source readiness: LICENSE, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY,
+  issue/PR templates, ARCHITECTURE, and GitHub-hosted CI.
+
+### Fixed
+- **Data-loss cluster (never lose a save):** the AutoSaver now retries a failed
+  write inside the awaited flush so `flushAll()` on quit/hide can't resolve
+  while a write is still owed (#49/#52/#53); `atomic_write` fsyncs the parent
+  directory so a rename survives power-loss (#50); `read_index` no longer masks
+  real pads with an empty workspace on a read error (#57); `export_pad` won't
+  overwrite the destination with an empty file when the source is unreadable
+  (#56); `addPad`/`importPad`/`restoreFromTrash` no longer drop concurrent edits
+  via stale captured state (#58–#61).
+- Revision restore no longer applies the wrong/stale revision on a fast click
+  (#55/#62); find/search offset and preview-mode jump correctness (#54 and
+  others).
+
 ## [1.0.0] — 2026-06-25
 
 First production-quality build — the "Working MVP". A menu-bar quick-sketchpad
