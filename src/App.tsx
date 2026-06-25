@@ -296,7 +296,7 @@ export default function App() {
   const fontSize = ws.index.settings.fontSize ?? 15;
 
   return (
-    <div className="app">
+    <div className="app" data-color={ws.activePad?.color ?? "amber"}>
       <TopBar
         pads={ws.index.pads}
         contents={ws.contents}
