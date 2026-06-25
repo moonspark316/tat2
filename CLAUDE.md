@@ -19,7 +19,12 @@ full pitch and architecture.
 
 ```
 src/                  React frontend
-  App.tsx             main UI (top bar, color dots, editor, status bar, settings)
+  App.tsx             top-level composition: theme, global keys, overlay wiring
+  hooks/useWorkspace.ts  owns pads/contents/active-selection state + AutoSaver
+  components/         presentational UI — TopBar, Editor, StatusBar, FindBar,
+                      SearchOverlay, RevisionBrowser, TrashView, SettingsPanel,
+                      MarkdownView
+  lib/                pure logic (unit-tested): diff, search, shortcut, text
   storage.ts          invoke() wrappers + AutoSaver (debounced invisible saves)
   palette.ts          the 7-color pad palette + theming helpers
   types.ts            shared TS types mirroring the Rust structs

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / discussion
+    url: https://github.com/moonspark316/tat2/discussions
+    about: Ask questions or share ideas that aren't bugs or concrete feature requests.
+  - name: Security vulnerability
+    url: https://github.com/moonspark316/tat2/security/advisories/new
+    about: Please report security issues privately, not as public issues.
