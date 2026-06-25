@@ -418,6 +418,76 @@ body,
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* Manual "Check for updates" control: only the staged-update state is accented,
+   so an available update reads as a gentle nudge, not a warning. */
+.settings .update-action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.settings .update-action.ready {
+  background: var(--dot);
+  border-color: var(--dot);
+  color: #fff;
+}
+
+/* ---- Update pill ----
+   The single quiet update affordance. A small, low-contrast pill that drifts in
+   at the bottom of the writing surface once a verified build is staged. No
+   spinner, no badge — just "restart" + a dismiss. */
+.update-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--dot) 88%, #000 6%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  animation: update-pill-in 240ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-pill {
+    animation: none;
+  }
+}
+@keyframes update-pill-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.update-pill button {
+  border: none;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.update-pill-apply {
+  padding: 7px 12px;
+  font-weight: 500;
+}
+.update-pill-apply:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.update-pill-dismiss {
+  padding: 7px 10px;
+  font-size: 14px;
+  opacity: 0.8;
+}
+.update-pill-dismiss:hover {
+  background: rgba(255, 255, 255, 0.14);
+  opacity: 1;
+}
 
 .segmented {
   display: flex;

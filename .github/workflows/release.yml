@@ -67,6 +67,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Sign the auto-update artifacts (minisign). tauri-action generates +
+          # uploads `latest.json` to the release automatically when these are set
+          # and `bundle.createUpdaterArtifacts` is true in tauri.conf.json.
+          # Add these as repo secrets (see README "Auto-update"); without them
+          # the build still succeeds but produces no signed update manifest.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Working MVP (v1.0.0)"
