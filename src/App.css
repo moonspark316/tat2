@@ -5,6 +5,25 @@
   --dot: #e3b341;
   --radius: 14px;
 
+  /* ---- Paper surface ----
+   * The editor is a sheet of notebook paper, not a screen: a gentle
+   * low-contrast gradient (paper catching window light) + a faint dot grid.
+   * Both derive from the active pad's tokens (--bg / --ink), so the texture
+   * is warm on amber, cool on blue, light on dark — and always a whisper.
+   * Tuning knobs: the mix %s below (smaller = subtler) and the dot size. */
+  --paper-hi: color-mix(in srgb, var(--bg) 92%, #fff);
+  --paper-lo: color-mix(in srgb, var(--bg) 95.5%, #000);
+  --paper-grad: radial-gradient(
+    135% 120% at 50% -10%,
+    var(--paper-hi) 0%,
+    var(--bg) 55%,
+    var(--paper-lo) 100%
+  );
+  --paper-dots: radial-gradient(
+    color-mix(in srgb, var(--ink) 14%, transparent) 1px,
+    transparent 1.7px
+  );
+
   font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
   font-size: 15px;
@@ -31,7 +50,9 @@ body,
 
 .boot {
   height: 100%;
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: var(--paper-dots), var(--paper-grad);
+  background-size: 22px 22px, cover;
   border-radius: var(--radius);
 }
 
@@ -39,7 +60,12 @@ body,
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  /* Paper: gentle gradient + a faint pad-colored dot grid. The chrome rails
+     (top/status bars) paint opaque on top, so texture shows only on the sheet. */
+  background-color: var(--bg);
+  background-image: var(--paper-dots), var(--paper-grad);
+  background-size: 22px 22px, cover;
+  background-position: center, center;
   border-radius: var(--radius);
   overflow: hidden;
   border: 0.5px solid rgba(0, 0, 0, 0.12);
@@ -154,7 +180,8 @@ body,
   resize: none;
   border: none;
   outline: none;
-  background: var(--bg);
+  /* Transparent so the paper surface on .app shows through behind the text. */
+  background: transparent;
   color: var(--ink);
   padding: 16px 18px;
   line-height: 1.5;
@@ -623,4 +650,56 @@ body,
 .trash-row button.danger {
   color: #c0392b;
   border-color: rgba(192, 57, 43, 0.4);
+}
+
+/* ---- Animated accent glow on overlay cards ----
+ * The one moving flourish in the app, and only on the modal moments where you
+ * aren't typing: a slow glint of the active pad's color travels the card edge.
+ * The writing surface stays perfectly still. Reduced-motion → a static edge. */
+@property --tat-spin {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.search,
+.revbrowser {
+  position: relative;
+}
+.search::before,
+.revbrowser::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px; /* ring thickness */
+  background: conic-gradient(
+    from var(--tat-spin),
+    transparent 0deg,
+    color-mix(in srgb, var(--dot) 85%, transparent) 90deg,
+    transparent 200deg,
+    color-mix(in srgb, var(--dot) 55%, transparent) 300deg,
+    transparent 360deg
+  );
+  /* Show only the 1.5px ring, not the filled shape. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .search::before,
+  .revbrowser::before {
+    animation: tat-spin 7s linear infinite;
+  }
+}
+@keyframes tat-spin {
+  to {
+    --tat-spin: 360deg;
+  }
 }
