@@ -89,18 +89,24 @@ a manual check from **Settings → Updates**.
 
 The update feed is the GitHub release manifest at
 `releases/latest/download/latest.json`, signed with the updater's private key in
-CI. For maintainers, releasing signed updates needs two GitHub Actions secrets:
+CI. Auto-update artifacts are **off by default** so releases build without a
+signing key. For maintainers, turning on signed updates takes two steps:
 
-| Secret | Value |
-| --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | Contents of the updater private key file |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password set when the key was generated |
+1. Add two GitHub Actions secrets:
 
-The matching **public** key is committed in `src-tauri/tauri.conf.json`
+   | Secret | Value |
+   | --- | --- |
+   | `TAURI_SIGNING_PRIVATE_KEY` | Contents of the updater private key file |
+   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password set when the key was generated |
+
+2. Set `bundle.createUpdaterArtifacts: true` in `src-tauri/tauri.conf.json`.
+
+The matching **public** key is already committed in `src-tauri/tauri.conf.json`
 (`plugins.updater.pubkey`); rotating the key means regenerating the pair
-(`pnpm tauri signer generate`) and updating both. Without the secrets the release
-build still succeeds but produces no signed `latest.json`, so clients simply find
-no update.
+(`pnpm tauri signer generate`) and updating both. **Note:** enabling
+`createUpdaterArtifacts` *without* the secrets makes the release build fail
+(it can't sign), so do both together. Until then, releases publish normal
+bundles and clients simply find no update.
 
 > The updater's minisign signature is independent of OS code-signing. Until
 > macOS notarization lands (the cert is still pending), macOS users get the same
