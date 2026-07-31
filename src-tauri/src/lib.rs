@@ -141,6 +141,64 @@ fn focus_app_macos(win: &tauri::WebviewWindow) {
         ns_window.makeKeyAndOrderFront(None);
         ns_window.orderFrontRegardless();
     }
+
+    // CO-BUG (issue #70, pending on-device verification): the
+    // `activateIgnoringOtherApps(true)` above force-activates this Accessory app
+    // on every summon. When another app is in a full-screen Space, macOS may
+    // respond to that activation by switching Spaces (kicking the user out of
+    // full-screen), which would defeat the purpose of floating the popover over
+    // it. Activation is still required for reliable summon-and-type focus on a
+    // normal desktop, so it is intentionally left in place here. If on-device
+    // testing shows a Space-switch, the follow-up is to skip
+    // `activateIgnoringOtherApps` and rely on `orderFrontRegardless` alone when
+    // summoning over a full-screen Space.
+}
+
+/// Configure the popover's `NSWindow` collection behavior so it can float over
+/// *other apps'* full-screen Spaces — like a real menu-bar utility.
+///
+/// Why this exists (issue #70): tao's `set_visible_on_all_workspaces(true)` only
+/// ORs `NSWindowCollectionBehavior::CanJoinAllSpaces` into the window's
+/// collection behavior — it omits `FullScreenAuxiliary`. Without
+/// `FullScreenAuxiliary` an always-on-top window still cannot be shown on the
+/// Space owned by another app that is currently full-screen, so summoning Tat2
+/// while (say) Safari is full-screen would appear to do nothing. We OR in *both*
+/// bits so the popover joins every Space AND is permitted as an auxiliary window
+/// over full-screen Spaces.
+///
+/// We read the current `collectionBehavior()` and OR into it (rather than
+/// overwriting) so we don't clobber whatever tao/Tauri has already set. This
+/// deliberately does NOT change the window *level* — `alwaysOnTop` /
+/// `NSFloatingWindowLevel` are left as-is to keep the change minimal (a
+/// permanent status-window-level bump was judged an unnecessary regression
+/// risk). No-op off the main thread (we are always on it here).
+#[cfg(target_os = "macos")]
+fn configure_popover_spaces_macos(win: &tauri::WebviewWindow) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+    use objc2_foundation::MainThreadMarker;
+
+    let Some(_mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Ok(ns_window_ptr) = win.ns_window() else {
+        return;
+    };
+    if ns_window_ptr.is_null() {
+        return;
+    }
+
+    // SAFETY: `ns_window()` hands us an autoreleased pointer to the window's
+    // live `NSWindow`. We retain it for the duration of these calls and only
+    // invoke standard AppKit methods on the main thread.
+    unsafe {
+        let ns_window: Retained<NSWindow> =
+            Retained::retain(ns_window_ptr.cast()).expect("non-null NSWindow");
+        let behavior = ns_window.collectionBehavior()
+            | NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary;
+        ns_window.setCollectionBehavior(behavior);
+    }
 }
 
 /// Summon the popover: position it on the user's current display, show it, and
@@ -150,6 +208,10 @@ fn show_window(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
         position_window(app);
         let _ = win.show();
+        // Re-apply the full-screen-Space collection behavior on every summon so
+        // it sticks after the first `orderFront` (issue #70).
+        #[cfg(target_os = "macos")]
+        configure_popover_spaces_macos(&win);
         // `set_focus` is a no-op until the window is visible, hence after show.
         let _ = win.set_focus();
         #[cfg(target_os = "macos")]
@@ -357,7 +419,15 @@ pub fn run() {
                 // window can't draw over a full-screen app; this sets the
                 // NSWindow collection behavior (canJoinAllSpaces |
                 // fullScreenAuxiliary) so the summoned pad floats above it.
+                //
+                // tao's `set_visible_on_all_workspaces(true)` only sets
+                // `CanJoinAllSpaces` (NOT `FullScreenAuxiliary`), so on its own
+                // it is insufficient for full-screen Spaces (issue #70). We keep
+                // it for the CanJoinAllSpaces bit and then OR in
+                // `FullScreenAuxiliary` via the helper below.
                 let _ = win.set_visible_on_all_workspaces(true);
+                #[cfg(target_os = "macos")]
+                configure_popover_spaces_macos(&win);
 
                 let w = win.clone();
                 win.on_window_event(move |event| match event {
