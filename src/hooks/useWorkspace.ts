@@ -88,6 +88,51 @@ export function unarchivePadFromIndex(index: Index, id: string): Index {
 }
 
 /**
+ * Archive many pads at once (right-click bulk actions: "archive to the left /
+ * right / others / all"). Archives every currently-visible pad whose id is in
+ * `ids`; already-archived ids and unknown ids are ignored. Upholds the same
+ * invariant as `archivePadFromIndex`: the strip is never emptied — if `ids`
+ * would archive every visible pad, one is spared (the active pad when it's in
+ * the set, otherwise the last visible pad in strip order). If the active pad
+ * ends up archived, the active selection falls back to the first still-visible
+ * pad. Returns the SAME reference when nothing changes.
+ */
+export function archiveManyFromIndex(index: Index, ids: string[]): Index {
+  const idSet = new Set(ids);
+  const visible = index.pads.filter(isVisible);
+  let toArchive = visible.filter((p) => idSet.has(p.id));
+  if (toArchive.length === 0) return index;
+  // Never empty the strip: if this covers every visible pad, spare one.
+  if (toArchive.length >= visible.length) {
+    const active = index.activePadId;
+    const spareId =
+      active && idSet.has(active) ? active : visible[visible.length - 1].id;
+    toArchive = toArchive.filter((p) => p.id !== spareId);
+  }
+  if (toArchive.length === 0) return index;
+  const archiveSet = new Set(toArchive.map((p) => p.id));
+  const pads = index.pads.map((p) =>
+    archiveSet.has(p.id) ? { ...p, archived: true } : p,
+  );
+  const stillVisible = pads.filter(isVisible);
+  const activePadId =
+    index.activePadId && archiveSet.has(index.activePadId)
+      ? (stillVisible[0]?.id ?? null)
+      : index.activePadId;
+  return { ...index, pads, activePadId };
+}
+
+/** Unarchive every archived pad in one shot (right-click "unarchive all").
+ *  Returns the SAME reference if nothing is archived. */
+export function unarchiveAllFromIndex(index: Index): Index {
+  if (!index.pads.some((p) => p.archived)) return index;
+  const pads = index.pads.map((p) =>
+    p.archived ? { ...p, archived: false } : p,
+  );
+  return { ...index, pads };
+}
+
+/**
  * Merge a strip reorder (visible-only `orderedIds`, in their new order) back
  * into the FULL pad list, leaving archived pads pinned at their current slots.
  *
@@ -356,6 +401,22 @@ export function useWorkspace() {
     [persistIndexUpdate],
   );
 
+  /** Bulk-archive (right-click strip actions). Flush first for the same reason
+   *  as `archivePad`: any of the archived pads may be the active one, and
+   *  archiving moves the active selection — pending keystrokes must land first. */
+  const archiveMany = useCallback(
+    async (ids: string[]) => {
+      await saver.current.flushAll();
+      persistIndexUpdate((prev) => archiveManyFromIndex(prev, ids));
+    },
+    [persistIndexUpdate],
+  );
+
+  /** Return every archived pad to the strip in one shot. */
+  const unarchiveAll = useCallback(() => {
+    persistIndexUpdate((prev) => unarchiveAllFromIndex(prev));
+  }, [persistIndexUpdate]);
+
   /** Bring a trashed pad back into the workspace. */
   const restoreFromTrash = useCallback(
     async (id: string) => {
@@ -512,6 +573,8 @@ export function useWorkspace() {
     removePad,
     archivePad,
     unarchivePad,
+    archiveMany,
+    unarchiveAll,
     renamePad,
     recolorPad,
     reorderPads,

@@ -1,18 +1,28 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { PadMeta } from "../types";
 import { swatch } from "../palette";
 import { DEFAULT_PAD_TITLE, hasExplicitTitle, padLabel } from "../lib/text";
 import { computeDotFit, selectVisibleDots } from "../lib/dotFit";
+import { ContextMenu, type MenuEntry } from "./ContextMenu";
 
 interface TopBarProps {
   pads: PadMeta[];
   contents: Record<string, string>;
   activeId: string | null;
   pinned: boolean;
+  hasArchived: boolean;
   onSwitch: (id: string) => void;
   onAdd: () => void;
   onRename: (id: string, title: string) => void;
   onReorder: (orderedIds: string[]) => void;
+  onArchiveMany: (ids: string[]) => void;
+  onUnarchiveAll: () => void;
   onTogglePin: () => void;
   onOverview: () => void;
   onHistory: () => void;
@@ -22,15 +32,25 @@ interface TopBarProps {
   onClose: () => void;
 }
 
+/** An open right-click menu: where to draw it and what to show. */
+interface OpenMenu {
+  x: number;
+  y: number;
+  items: MenuEntry[];
+}
+
 export function TopBar({
   pads,
   contents,
   activeId,
   pinned,
+  hasArchived,
   onSwitch,
   onAdd,
   onRename,
   onReorder,
+  onArchiveMany,
+  onUnarchiveAll,
   onTogglePin,
   onOverview,
   onHistory,
@@ -42,7 +62,72 @@ export function TopBar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<OpenMenu | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Right-click a dot → bulk-archive actions relative to that pad's position in
+  // the (visible) strip order. `pads` is already the visible list, so slicing it
+  // gives the pads to this pad's left/right regardless of the "+N" overflow chip.
+  const openDotMenu = (e: ReactMouseEvent, pad: PadMeta, i: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ids = pads.map((p) => p.id);
+    const only = pads.length <= 1;
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          label: "Archive to the left",
+          disabled: i === 0,
+          onClick: () => onArchiveMany(ids.slice(0, i)),
+        },
+        {
+          label: "Archive to the right",
+          disabled: i === pads.length - 1,
+          onClick: () => onArchiveMany(ids.slice(i + 1)),
+        },
+        {
+          label: "Archive others",
+          disabled: only,
+          onClick: () => onArchiveMany(ids.filter((id) => id !== pad.id)),
+        },
+        "separator",
+        {
+          label: "Archive this pad",
+          disabled: only,
+          onClick: () => onArchiveMany([pad.id]),
+        },
+        "separator",
+        { label: "Rename…", onClick: () => startRename(pad) },
+      ],
+    });
+  };
+
+  // Right-click the ▦ toolbar icon → whole-strip archive actions.
+  const openToolbarMenu = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const others = pads.filter((p) => p.id !== activeId).map((p) => p.id);
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          label: "Archive all but active",
+          disabled: others.length === 0,
+          onClick: () => onArchiveMany(others),
+        },
+        {
+          label: "Unarchive all",
+          disabled: !hasArchived,
+          onClick: onUnarchiveAll,
+        },
+        "separator",
+        { label: "Open all sketchpads (⌘O)", onClick: onOverview },
+      ],
+    });
+  };
 
   // ---- Measure the `.dots` container so the strip never overflows (#69) ----
   // Local UI state only: TopBar stays presentational (no persistence). We watch
@@ -150,6 +235,7 @@ export function TopBar({
                     onDragEnd={() => setDragId(null)}
                     onClick={() => onSwitch(p.id)}
                     onDoubleClick={() => startRename(p)}
+                    onContextMenu={(e) => openDotMenu(e, p, pads.indexOf(p))}
                   />
                 );
               })}
@@ -185,7 +271,8 @@ export function TopBar({
       <button
         className="icon-btn overview"
         onClick={onOverview}
-        title="All sketchpads (⌘O)"
+        onContextMenu={openToolbarMenu}
+        title="All sketchpads (⌘O) — right-click to archive"
       >
         ▦
       </button>
@@ -217,6 +304,15 @@ export function TopBar({
             if (e.key === "Enter") commitRename();
             if (e.key === "Escape") setRenamingId(null);
           }}
+        />
+      ) : null}
+
+      {menu ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menu.items}
+          onClose={() => setMenu(null)}
         />
       ) : null}
     </header>

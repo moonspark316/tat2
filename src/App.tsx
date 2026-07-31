@@ -372,10 +372,13 @@ export default function App() {
         contents={ws.contents}
         activeId={ws.activeId}
         pinned={pinned}
+        hasArchived={visiblePads.length < ws.index.pads.length}
         onSwitch={ws.switchPad}
         onAdd={ws.addPad}
         onRename={ws.renamePad}
         onReorder={ws.reorderPads}
+        onArchiveMany={ws.archiveMany}
+        onUnarchiveAll={ws.unarchiveAll}
         onTogglePin={togglePin}
         onOverview={() => {
           setShowFind(false);
