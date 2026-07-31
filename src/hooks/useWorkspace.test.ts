@@ -7,11 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
-import { appendActivePad, removePadFromIndex } from "./useWorkspace";
+import {
+  appendActivePad,
+  archivePadFromIndex,
+  ensureVisiblePad,
+  isVisible,
+  removePadFromIndex,
+  reorderVisibleInIndex,
+  unarchivePadFromIndex,
+} from "./useWorkspace";
 import { AutoSaver } from "../storage";
 import type { Index, PadMeta } from "../types";
 
-function pad(id: string, order: number): PadMeta {
+function pad(id: string, order: number, archived = false): PadMeta {
   return {
     id,
     title: id,
@@ -19,6 +27,7 @@ function pad(id: string, order: number): PadMeta {
     order,
     createdAt: 0,
     updatedAt: 0,
+    ...(archived ? { archived: true } : {}),
   };
 }
 
@@ -180,5 +189,140 @@ describe("saver.enqueue durability (#58 mechanism)", () => {
 
     // The edit must run strictly AFTER the seed finishes — never interleaved.
     expect(order).toEqual(["seed-start", "seed-end", "edit:v1"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #68 — archive/unarchive pure transitions + strip-visibility invariants.
+// ---------------------------------------------------------------------------
+describe("archivePadFromIndex (#68)", () => {
+  it("flips archived:true and keeps the pad in the list", () => {
+    const next = archivePadFromIndex(index(["a", "b"], "a"), "b");
+    expect(next.pads.find((p) => p.id === "b")?.archived).toBe(true);
+    expect(next.pads.map((p) => p.id)).toEqual(["a", "b"]);
+  });
+
+  it("re-derives active to the first STILL-visible pad when archiving the active pad", () => {
+    const next = archivePadFromIndex(index(["a", "b", "c"], "a"), "a");
+    // "a" archived -> first still-visible is "b".
+    expect(next.activePadId).toBe("b");
+    expect(next.pads.find((p) => p.id === "a")?.archived).toBe(true);
+  });
+
+  it("leaves a non-active archive's active selection untouched", () => {
+    const next = archivePadFromIndex(index(["a", "b", "c"], "a"), "c");
+    expect(next.activePadId).toBe("a");
+  });
+
+  it("is a no-op (same ref) when archiving would leave zero visible pads", () => {
+    const idx = index(["a"], "a"); // only one visible pad
+    expect(archivePadFromIndex(idx, "a")).toBe(idx);
+  });
+
+  it("is a no-op (same ref) when already archived", () => {
+    const idx: Index = {
+      version: 1,
+      activePadId: "a",
+      pads: [pad("a", 0), pad("b", 1, true)],
+      settings: {},
+    };
+    expect(archivePadFromIndex(idx, "b")).toBe(idx);
+  });
+
+  it("is a no-op (same ref) when the pad isn't present", () => {
+    const idx = index(["a", "b"], "a");
+    expect(archivePadFromIndex(idx, "zzz")).toBe(idx);
+  });
+
+  it("does not mutate the input index", () => {
+    const idx = index(["a", "b"], "a");
+    const before = JSON.stringify(idx);
+    archivePadFromIndex(idx, "b");
+    expect(JSON.stringify(idx)).toBe(before);
+  });
+});
+
+describe("unarchivePadFromIndex (#68)", () => {
+  it("clears archived and does not change the active pad", () => {
+    const idx: Index = {
+      version: 1,
+      activePadId: "a",
+      pads: [pad("a", 0), pad("b", 1, true)],
+      settings: {},
+    };
+    const next = unarchivePadFromIndex(idx, "b");
+    expect(next.pads.find((p) => p.id === "b")?.archived).toBe(false);
+    expect(next.activePadId).toBe("a");
+  });
+
+  it("is a no-op (same ref) when not archived", () => {
+    const idx = index(["a", "b"], "a");
+    expect(unarchivePadFromIndex(idx, "b")).toBe(idx);
+  });
+});
+
+describe("reorderVisibleInIndex preserves archived pads (#68)", () => {
+  it("keeps archived pads pinned while reordering the visible ones", () => {
+    // Full list: a(vis) b(arch) c(vis) d(vis). Strip shows [a, c, d]; user drags
+    // to [d, a, c]. Archived "b" must stay pinned at index 1.
+    const idx: Index = {
+      version: 1,
+      activePadId: "a",
+      pads: [pad("a", 0), pad("b", 1, true), pad("c", 2), pad("d", 3)],
+      settings: {},
+    };
+    const next = reorderVisibleInIndex(idx, ["d", "a", "c"]);
+    expect(next.pads.map((p) => p.id)).toEqual(["d", "b", "a", "c"]);
+    // "b" is still archived and every order is a gapless sequential index.
+    expect(next.pads.find((p) => p.id === "b")?.archived).toBe(true);
+    expect(next.pads.map((p) => p.order)).toEqual([0, 1, 2, 3]);
+  });
+
+  it("assigns gapless sequential order across the full list", () => {
+    const idx: Index = {
+      version: 1,
+      activePadId: "a",
+      pads: [pad("a", 0), pad("b", 1), pad("c", 2, true)],
+      settings: {},
+    };
+    const next = reorderVisibleInIndex(idx, ["b", "a"]);
+    expect(next.pads.map((p) => p.id)).toEqual(["b", "a", "c"]);
+    expect(next.pads.map((p) => p.order)).toEqual([0, 1, 2]);
+  });
+});
+
+describe("ensureVisiblePad load-time invariant (#68)", () => {
+  it("revives the active pad when every pad is archived", () => {
+    const idx: Index = {
+      version: 1,
+      activePadId: "b",
+      pads: [pad("a", 0, true), pad("b", 1, true)],
+      settings: {},
+    };
+    const next = ensureVisiblePad(idx);
+    expect(next.pads.find((p) => p.id === "b")?.archived).toBe(false);
+    expect(next.pads.some(isVisible)).toBe(true);
+  });
+
+  it("revives the first pad when all archived and there is no active pad", () => {
+    const idx: Index = {
+      version: 1,
+      activePadId: null,
+      pads: [pad("a", 0, true), pad("b", 1, true)],
+      settings: {},
+    };
+    const next = ensureVisiblePad(idx);
+    expect(next.pads.find((p) => p.id === "a")?.archived).toBe(false);
+    expect(next.activePadId).toBe("a");
+  });
+
+  it("is a no-op (same ref) when at least one pad is already visible", () => {
+    const idx: Index = {
+      version: 1,
+      activePadId: "a",
+      pads: [pad("a", 0), pad("b", 1, true)],
+      settings: {},
+    };
+    expect(ensureVisiblePad(idx)).toBe(idx);
   });
 });

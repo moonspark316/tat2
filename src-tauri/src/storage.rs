@@ -44,6 +44,14 @@ pub struct PadMeta {
     pub created_at: u64,
     #[serde(rename = "updatedAt")]
     pub updated_at: u64,
+    /// Whether the pad is archived (OneTab-style): hidden from the strip but
+    /// still searchable and unarchivable. Archive state lives ONLY here in
+    /// index.json — never in the Markdown, which stays the source of truth.
+    /// Omitted from serialized output when false so non-archived pads round-trip
+    /// byte-identically to pre-archive index.json, and a missing field on load
+    /// defaults to false (old files keep working).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -236,6 +244,7 @@ fn default_index() -> Index {
             order: 0,
             created_at: ts,
             updated_at: ts,
+            archived: false,
         }],
         settings: Settings {
             global_shortcut: Some(default_shortcut()),
@@ -478,6 +487,7 @@ fn recovered_meta(id: &str) -> PadMeta {
         order: 0,
         created_at: 0,
         updated_at: 0,
+        archived: false,
     }
 }
 
@@ -1147,6 +1157,7 @@ mod tests {
             order: 0,
             created_at: 1,
             updated_at: 2,
+            archived: false,
         };
 
         // Trash: live files move into trash/, including the .automerge.
@@ -1320,6 +1331,7 @@ mod tests {
                     order: 0,
                     created_at: 1,
                     updated_at: 2,
+                    archived: false,
                 },
                 PadMeta {
                     id: "pad-y".into(),
@@ -1328,6 +1340,7 @@ mod tests {
                     order: 1,
                     created_at: 3,
                     updated_at: 4,
+                    archived: false,
                 },
             ],
             settings: Settings::default(),
@@ -1339,5 +1352,35 @@ mod tests {
         assert_eq!(back.pads.len(), 2);
         assert_eq!(back.active_pad_id.as_deref(), Some("pad-x"));
         assert_eq!(back.pads[1].id, "pad-y");
+        // Missing `archived` in serialized output defaults to false on load.
+        assert!(!back.pads[0].archived);
+    }
+
+    // --- #68: archived field serde (omitted when false, default on load) -----
+
+    #[test]
+    fn pad_meta_omits_archived_when_false_and_emits_when_true() {
+        let mut meta = recovered_meta("p");
+        // Non-archived pads serialize byte-identically to pre-archive files: the
+        // `archived` key must be entirely absent.
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(
+            !json.contains("archived"),
+            "archived must be omitted: {json}"
+        );
+        // An archived pad emits the field.
+        meta.archived = true;
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(json.contains("\"archived\":true"), "got: {json}");
+    }
+
+    #[test]
+    fn pad_meta_defaults_archived_false_when_missing() {
+        // An index.json predating the archive feature has no `archived` key; it
+        // must load as false, never error.
+        let json =
+            r#"{"id":"p","title":"T","color":"amber","order":0,"createdAt":1,"updatedAt":2}"#;
+        let meta: PadMeta = serde_json::from_str(json).unwrap();
+        assert!(!meta.archived);
     }
 }

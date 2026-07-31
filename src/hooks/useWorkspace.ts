@@ -47,6 +47,88 @@ export function removePadFromIndex(index: Index, id: string): Index {
   return { ...index, pads, activePadId };
 }
 
+/** A pad is visible in the strip iff it isn't archived. Test with truthiness —
+ *  Rust omits `archived` when false, so `=== false` would wrongly reject a pad
+ *  whose key is simply absent (#68). */
+export const isVisible = (p: PadMeta): boolean => !p.archived;
+
+/**
+ * Archive pad `id` (OneTab-style): flip `archived:true`. No-op (returns the
+ * SAME reference) if the target is already archived, isn't present, or archiving
+ * it would leave zero visible pads — the strip must never be empty. If the
+ * archived pad was the active one, re-derive the active selection to the first
+ * STILL-visible pad (mirroring `removePadFromIndex`'s fallback shape), since an
+ * archived pad can no longer be the strip's active pad.
+ */
+export function archivePadFromIndex(index: Index, id: string): Index {
+  const target = index.pads.find((p) => p.id === id);
+  if (!target || target.archived) return index;
+  // Never archive the last visible pad.
+  if (index.pads.filter(isVisible).length <= 1) return index;
+  const pads = index.pads.map((p) =>
+    p.id === id ? { ...p, archived: true } : p,
+  );
+  const stillVisible = pads.filter(isVisible);
+  const activePadId =
+    index.activePadId === id
+      ? (stillVisible[0]?.id ?? null)
+      : index.activePadId;
+  return { ...index, pads, activePadId };
+}
+
+/** Unarchive pad `id`: clear `archived`. No active-pad change. No-op (same
+ *  reference) if the pad isn't present or isn't archived. */
+export function unarchivePadFromIndex(index: Index, id: string): Index {
+  const target = index.pads.find((p) => p.id === id);
+  if (!target || !target.archived) return index;
+  const pads = index.pads.map((p) =>
+    p.id === id ? { ...p, archived: false } : p,
+  );
+  return { ...index, pads };
+}
+
+/**
+ * Merge a strip reorder (visible-only `orderedIds`, in their new order) back
+ * into the FULL pad list, leaving archived pads pinned at their current slots.
+ *
+ * The strip only ever shows/drag-reorders visible pads, so `orderedIds` is a
+ * permutation of the visible ids ONLY. We walk the current full list in place:
+ * each visible slot consumes the next id from `orderedIds` (looked up by id);
+ * archived slots keep whatever pad already sits there. Then `order` is assigned
+ * in a single sequential pass over the resulting full array so there are no
+ * gaps or collisions and archived pads survive the reorder (#68).
+ */
+export function reorderVisibleInIndex(
+  index: Index,
+  orderedIds: string[],
+): Index {
+  const byId = new Map(index.pads.map((p) => [p.id, p]));
+  let cursor = 0;
+  const merged: PadMeta[] = index.pads.map((p) => {
+    if (!isVisible(p)) return p; // archived pad stays pinned in place
+    // Consume the next visible id from the reordered list.
+    while (cursor < orderedIds.length && !byId.has(orderedIds[cursor])) cursor++;
+    const nextId = orderedIds[cursor++];
+    return byId.get(nextId) ?? p;
+  });
+  const pads = merged.map((p, order) => (p.order === order ? p : { ...p, order }));
+  return { ...index, pads };
+}
+
+/** Ensure at least one pad is visible: if EVERY pad is archived, unarchive the
+ *  active pad (or the first pad) so the strip is never empty and there is always
+ *  an editable active pad. Returns the SAME reference when nothing needs fixing
+ *  so callers can skip a redundant persist. */
+export function ensureVisiblePad(index: Index): Index {
+  if (index.pads.length === 0 || index.pads.some(isVisible)) return index;
+  const reviveId = index.activePadId ?? index.pads[0].id;
+  const pads = index.pads.map((p) =>
+    p.id === reviveId ? { ...p, archived: false } : p,
+  );
+  const activePadId = index.activePadId ?? pads[0].id;
+  return { ...index, pads, activePadId };
+}
+
 /**
  * Owns all workspace state (pads, contents, active selection, settings) and the
  * invisible autosave engine. UI components stay presentational.
@@ -67,7 +149,13 @@ export function useWorkspace() {
       // Hydrate the CRDT docs (loading existing `.automerge` binaries, seeding
       // fresh docs from `.md` for pads that predate the migration).
       const migrated = store.current.hydrate(ws);
-      setIndex(ws.index);
+      // Load-time invariant (#68): the strip must never be empty. If every pad
+      // loaded archived (e.g. a hand-edited index.json), revive the active/first
+      // pad so there is always a visible, editable active pad — and persist the
+      // normalized index so the fix is durable.
+      const normalized = ensureVisiblePad(ws.index);
+      if (normalized !== ws.index) void saveIndex(normalized);
+      setIndex(normalized);
       // Use the docs' canonical text so the editor and CRDT never diverge.
       const text: Record<string, string> = {};
       for (const pad of ws.index.pads) {
@@ -156,10 +244,18 @@ export function useWorkspace() {
 
   const switchByOffset = useCallback(
     (delta: number) => {
-      if (!index || index.pads.length === 0) return;
-      const i = index.pads.findIndex((p) => p.id === activeId);
+      if (!index) return;
+      // Cycle only through VISIBLE pads — archived ones aren't in the strip
+      // (#68). If the active pad isn't visible, step in from the edge.
+      const visible = index.pads.filter(isVisible);
+      if (visible.length === 0) return;
+      const i = visible.findIndex((p) => p.id === activeId);
       const next =
-        index.pads[(i + delta + index.pads.length) % index.pads.length];
+        i === -1
+          ? delta > 0
+            ? visible[0]
+            : visible[visible.length - 1]
+          : visible[(i + delta + visible.length) % visible.length];
       if (next) switchPad(next.id);
     },
     [index, activeId, switchPad],
@@ -168,7 +264,9 @@ export function useWorkspace() {
   const switchByPosition = useCallback(
     (pos: number) => {
       if (!index) return;
-      const pad = index.pads[pos];
+      // Index into the VISIBLE subset so ⌘1..⌘9 map to the strip the user sees.
+      // Keep the `if (pad)` guard so e.g. ⌘7 with 3 visible pads is a no-op.
+      const pad = index.pads.filter(isVisible)[pos];
       if (pad) switchPad(pad.id);
     },
     [index, switchPad],
@@ -236,6 +334,28 @@ export function useWorkspace() {
     [index, persistIndexUpdate],
   );
 
+  /** Archive a pad (OneTab-style hide). Archived pads keep their CRDT doc
+   *  resident for search/unarchive — we do NOT `store.forget()` here (only
+   *  `removePad` forgets). */
+  const archivePad = useCallback(
+    async (id: string) => {
+      // Archiving can change `activePadId`, so flush pending debounced edits
+      // first (mirroring `switchPad`) — otherwise the 400ms in-flight keystrokes
+      // to the pad being archived could be lost when the active pad moves.
+      await saver.current.flushAll();
+      persistIndexUpdate((prev) => archivePadFromIndex(prev, id));
+    },
+    [persistIndexUpdate],
+  );
+
+  /** Unarchive a pad, returning it to the strip. */
+  const unarchivePad = useCallback(
+    (id: string) => {
+      persistIndexUpdate((prev) => unarchivePadFromIndex(prev, id));
+    },
+    [persistIndexUpdate],
+  );
+
   /** Bring a trashed pad back into the workspace. */
   const restoreFromTrash = useCallback(
     async (id: string) => {
@@ -252,10 +372,12 @@ export function useWorkspace() {
       // while the restore was in flight would otherwise be dropped, and the
       // restored pad's `order` would be stale (#59/#61). Guard again here in
       // case the same id was concurrently re-added.
+      // Clear `archived` so a restored pad is always visible in the strip
+      // (never restored straight into the hidden archive) (#68).
       persistIndexUpdate((prev) =>
         prev.pads.some((p) => p.id === id)
           ? prev
-          : appendActivePad(prev, { ...meta }),
+          : appendActivePad(prev, { ...meta, archived: false }),
       );
     },
     [index, persistIndexUpdate],
@@ -284,18 +406,12 @@ export function useWorkspace() {
   );
 
   const reorderPads = useCallback(
+    // `orderedIds` is the strip's VISIBLE pads in their new order. Merge it into
+    // the full list so archived pads stay pinned and aren't dropped (#68).
     (orderedIds: string[]) => {
-      if (!index) return;
-      const byId = new Map(index.pads.map((p) => [p.id, p]));
-      const pads = orderedIds
-        .map((id, order) => {
-          const p = byId.get(id);
-          return p ? { ...p, order } : null;
-        })
-        .filter((p): p is PadMeta => p !== null);
-      persistIndex({ ...index, pads });
+      persistIndexUpdate((prev) => reorderVisibleInIndex(prev, orderedIds));
     },
-    [index, persistIndex],
+    [persistIndexUpdate],
   );
 
   const setFontSize = useCallback(
@@ -394,6 +510,8 @@ export function useWorkspace() {
     switchByPosition,
     addPad,
     removePad,
+    archivePad,
+    unarchivePad,
     renamePad,
     recolorPad,
     reorderPads,
