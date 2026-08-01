@@ -939,3 +939,48 @@ body,
     --tat-spin: 360deg;
   }
 }
+
+/* ---- Right-click context menu (bulk archive actions) ------------------- */
+.ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50; /* above overlays (30) so a menu opened over one stays on top */
+}
+.ctx-menu {
+  position: fixed;
+  min-width: 184px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  border: 0.5px solid rgba(128, 128, 128, 0.3);
+  border-radius: 9px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+.ctx-item {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.ctx-item:hover:not(:disabled) {
+  background: rgba(128, 128, 128, 0.18);
+}
+.ctx-item:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.ctx-item.danger {
+  color: #d05a4a;
+}
+.ctx-sep {
+  height: 0.5px;
+  margin: 4px 6px;
+  background: rgba(128, 128, 128, 0.24);
+}

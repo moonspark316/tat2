@@ -9,11 +9,13 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
 import {
   appendActivePad,
+  archiveManyFromIndex,
   archivePadFromIndex,
   ensureVisiblePad,
   isVisible,
   removePadFromIndex,
   reorderVisibleInIndex,
+  unarchiveAllFromIndex,
   unarchivePadFromIndex,
 } from "./useWorkspace";
 import { AutoSaver } from "../storage";
@@ -258,6 +260,75 @@ describe("unarchivePadFromIndex (#68)", () => {
   it("is a no-op (same ref) when not archived", () => {
     const idx = index(["a", "b"], "a");
     expect(unarchivePadFromIndex(idx, "b")).toBe(idx);
+  });
+});
+
+describe("archiveManyFromIndex (right-click bulk archive)", () => {
+  const archivedIds = (i: Index) =>
+    i.pads.filter((p) => p.archived).map((p) => p.id);
+
+  it("archives 'to the left' of a pivot", () => {
+    // Strip [a b c d e], pivot d → archive [a b c].
+    const next = archiveManyFromIndex(index(["a", "b", "c", "d", "e"], "e"), [
+      "a",
+      "b",
+      "c",
+    ]);
+    expect(archivedIds(next)).toEqual(["a", "b", "c"]);
+  });
+
+  it("archives 'others' but keeps the pivot visible", () => {
+    const next = archiveManyFromIndex(index(["a", "b", "c"], "b"), ["a", "c"]);
+    expect(archivedIds(next)).toEqual(["a", "c"]);
+    expect(next.pads.find((p) => p.id === "b")?.archived).toBeFalsy();
+  });
+
+  it("never empties the strip: spares the active pad when told to archive all", () => {
+    // "Archive all" passes every id; the active pad must stay visible.
+    const next = archiveManyFromIndex(index(["a", "b", "c"], "b"), [
+      "a",
+      "b",
+      "c",
+    ]);
+    expect(next.pads.filter(isVisible).map((p) => p.id)).toEqual(["b"]);
+    expect(next.activePadId).toBe("b");
+  });
+
+  it("re-derives the active pad when it gets archived", () => {
+    // Archive the active pad among a batch → active falls back to first visible.
+    const next = archiveManyFromIndex(index(["a", "b", "c"], "a"), ["a", "b"]);
+    expect(next.activePadId).toBe("c");
+  });
+
+  it("ignores already-archived and unknown ids; no-op returns same ref", () => {
+    const idx = index(["a", "b"], "a");
+    expect(archiveManyFromIndex(idx, [])).toBe(idx);
+    expect(archiveManyFromIndex(idx, ["zzz"])).toBe(idx);
+  });
+
+  it("does not mutate the input index", () => {
+    const idx = index(["a", "b", "c"], "a");
+    const before = JSON.stringify(idx);
+    archiveManyFromIndex(idx, ["b", "c"]);
+    expect(JSON.stringify(idx)).toBe(before);
+  });
+});
+
+describe("unarchiveAllFromIndex (right-click unarchive all)", () => {
+  it("clears archived on every pad", () => {
+    const idx: Index = {
+      version: 1,
+      activePadId: "a",
+      pads: [pad("a", 0), pad("b", 1, true), pad("c", 2, true)],
+      settings: {},
+    };
+    const next = unarchiveAllFromIndex(idx);
+    expect(next.pads.every((p) => !p.archived)).toBe(true);
+  });
+
+  it("is a no-op (same ref) when nothing is archived", () => {
+    const idx = index(["a", "b"], "a");
+    expect(unarchiveAllFromIndex(idx)).toBe(idx);
   });
 });
 
