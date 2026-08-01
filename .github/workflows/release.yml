@@ -130,26 +130,52 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Build & upload to release
+      # Decide whether to code-sign. Tauri's macOS bundler treats a *defined but
+      # empty* APPLE_CERTIFICATE as "sign this" and then fails `security import`
+      # on the empty cert — so we must NOT pass any APPLE_* var unless a real
+      # certificate secret exists. This step exposes that as a boolean the two
+      # build steps below switch on.
+      - name: Detect Apple signing secrets
+        id: apple
+        shell: bash
+        env:
+          HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        run: echo "enabled=$HAS_APPLE_CERT" >> "$GITHUB_OUTPUT"
+
+      # Signed build: only runs when Tat2's own Apple Developer cert is configured
+      # as repo secrets (see README "macOS signing"). Produces a notarized,
+      # Gatekeeper-friendly macOS bundle.
+      - name: Build & upload to release (signed)
+        if: steps.apple.outputs.enabled == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Sign the auto-update artifacts (minisign). tauri-action generates +
-          # uploads `latest.json` to the release automatically when these are set
-          # and `bundle.createUpdaterArtifacts` is true in tauri.conf.json.
-          # Add these as repo secrets (see README "Auto-update"); without them
-          # the build still succeeds but produces no signed update manifest.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS code signing + notarization (Gatekeeper). Active ONLY when these
-          # repo secrets are set with Tat2's OWN Apple Developer ID — absent, the
-          # macOS build is simply unsigned (no failure). See README "macOS signing".
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          releaseName: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      # Unsigned build: the default when no Apple cert secret is present. Passes
+      # ZERO APPLE_* vars so the bundler skips signing entirely (this is how
+      # v1.0.0/v1.1.0 shipped their macOS DMGs). Updater-signing vars are still
+      # passed but stay inert while bundle.createUpdaterArtifacts is false.
+      - name: Build & upload to release (unsigned)
+        if: steps.apple.outputs.enabled != 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
           releaseName: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
