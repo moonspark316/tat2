@@ -91,34 +91,26 @@ fn position_window(app: &tauri::AppHandle) {
     let _ = win.set_position(PhysicalPosition::new(x as i32, y as i32));
 }
 
-/// Force the popover to the front of the **active Space** and grab keyboard
+/// Bring the popover to the front of the **active Space** and give it keyboard
 /// focus, even though Tat2 runs as an `Accessory` app (no dock icon).
 ///
-/// Why this is needed: an `Accessory` app is not the active application, so
-/// `NSWindow::makeKeyAndOrderFront:` (what Tauri's `set_focus` issues) can order
-/// the window forward without it ever becoming *key* — the user would have to
-/// click before typing. Real menu-bar utilities work around this by explicitly
-/// activating the app. We do the same, in order:
+/// The window is a *non-activating* `NSPanel` (see `promote_to_panel_macos`), so
+/// it can become the key window and receive typed input *without* activating the
+/// app. That is deliberate: activating an Accessory app over another app's
+/// full-screen Space makes macOS switch Spaces (kicking the user out of full
+/// screen) — the exact regression that broke summon-over-full-screen (issue #70).
+/// So we do NOT call `activateIgnoringOtherApps` here; the panel's
+/// `-canBecomeKeyWindow → YES` override is what lets `makeKeyAndOrderFront:` grab
+/// focus. `orderFrontRegardless()` surfaces it above the full-screen surface.
 ///
-/// - `NSApplication::activateIgnoringOtherApps(true)` makes Tat2 the active app
-///   regardless of who is focused, so its window can legitimately take keyboard
-///   focus. (The modern `activate` is best-effort and may no-op unless the other
-///   app yields — unacceptable for a summon-and-type tool, so we use the
-///   still-functional `IgnoringOtherApps` variant.)
-/// - `makeKeyAndOrderFront:` + `orderFrontRegardless()` make it key and surface
-///   it above full-screen Spaces (paired with the `canJoinAllSpaces |
-///   fullScreenAuxiliary` collection behavior set at setup — see
-///   `set_visible_on_all_workspaces`).
-///
-/// This does **not** touch the activation policy, so the no-dock-icon invariant
-/// is preserved. No-op off the main thread (we are always on it here).
+/// No-op off the main thread (we are always on it here).
 #[cfg(target_os = "macos")]
 fn focus_app_macos(win: &tauri::WebviewWindow) {
     use objc2::rc::Retained;
-    use objc2_app_kit::{NSApplication, NSWindow};
+    use objc2_app_kit::NSWindow;
     use objc2_foundation::MainThreadMarker;
 
-    let Some(mtm) = MainThreadMarker::new() else {
+    let Some(_mtm) = MainThreadMarker::new() else {
         return;
     };
     let Ok(ns_window_ptr) = win.ns_window() else {
@@ -132,14 +124,114 @@ fn focus_app_macos(win: &tauri::WebviewWindow) {
     // live `NSWindow`. We retain it for the duration of these calls and only
     // invoke standard AppKit methods on the main thread.
     unsafe {
-        let app = NSApplication::sharedApplication(mtm);
-        #[allow(deprecated)]
-        app.activateIgnoringOtherApps(true);
-
         let ns_window: Retained<NSWindow> =
             Retained::retain(ns_window_ptr.cast()).expect("non-null NSWindow");
         ns_window.makeKeyAndOrderFront(None);
         ns_window.orderFrontRegardless();
+    }
+}
+
+/// Turn the popover's tao `NSWindow` into a non-activating `NSPanel` so it can
+/// float over *other apps'* full-screen Spaces — like a real menu-bar utility
+/// (Tot, Raycast, Ice). Called once at setup.
+///
+/// Why a panel (issue #70). Setting `CanJoinAllSpaces | FullScreenAuxiliary` and
+/// a high window level on the plain `NSWindow` was *not* enough — verified on
+/// device: the summoned pad still refused to composite over a full-screen app.
+/// The missing ingredient is the `NSWindowStyleMaskNonactivatingPanel` style,
+/// which only exists on `NSPanel`. A non-activating panel takes keyboard focus
+/// *without activating this app*, so macOS never switches away from the other
+/// app's full-screen Space — which is exactly how Tot/Raycast appear on top.
+///
+/// Mechanics, mirroring the community `tauri-nspanel` plugin but expressed in the
+/// same `objc2` generation Tauri already links (no extra ObjC-runtime crate):
+///
+/// 1. Repurpose the live window as a tiny `NSPanel` subclass via `object_setClass`.
+///    `NSWindow` and `NSPanel` share an instance layout, so this class swap is the
+///    long-standing, safe trick these utilities rely on. The subclass exists only
+///    to return `YES` from `-canBecomeKeyWindow`, so a *borderless* panel can still
+///    take keyboard focus (a borderless window returns `NO` by default).
+/// 2. OR `NonactivatingPanel` into the style mask.
+/// 3. OR `CanJoinAllSpaces | FullScreenAuxiliary` into the collection behavior
+///    (belt-and-suspenders alongside tao's `set_visible_on_all_workspaces`).
+/// 4. Raise to `NSFloatingWindowLevel` (4) — the level the proven recipe uses;
+///    once it's a non-activating panel an extreme level is unnecessary.
+///
+/// No-op off the main thread (we are always on it here).
+#[cfg(target_os = "macos")]
+fn promote_to_panel_macos(win: &tauri::WebviewWindow) {
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
+    use objc2::{class, sel};
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask};
+    use objc2_foundation::MainThreadMarker;
+
+    // `NSFloatingWindowLevel`. AppKit derives its window-level constants from
+    // CoreGraphics, so objc2-app-kit doesn't expose them as bindable constants —
+    // this is the stable numeric value (4).
+    const FLOATING_LEVEL: isize = 4;
+
+    // Raw runtime hook: swap an object's class. We use the bare FFI rather than
+    // objc2's `AnyObject::set_class`, whose debug assertion demands the old and
+    // new classes report identical `instance_size`. tao's window subclass and our
+    // `NSPanel` subclass may differ there, but the `NSWindow`/`NSPanel` base
+    // layout is shared, so the swap is sound — exactly what `tauri-nspanel` does.
+    extern "C" {
+        fn object_setClass(obj: *mut AnyObject, cls: *const AnyClass) -> *const AnyClass;
+    }
+
+    /// A minimal `NSPanel` subclass that answers `YES` to `-canBecomeKeyWindow`
+    /// (registered once; reused on subsequent calls).
+    fn panel_class() -> &'static AnyClass {
+        if let Some(cls) = AnyClass::get(c"Tat2Panel") {
+            return cls;
+        }
+        // Raw-pointer receiver (not `&NSObject`): a reference receiver forces a
+        // concrete lifetime that isn't "general enough" for `MethodImplementation`
+        // (which needs `for<'a>`); a raw pointer has no lifetime and sidesteps it.
+        extern "C" fn can_become_key(_this: *const AnyObject, _cmd: Sel) -> Bool {
+            Bool::YES
+        }
+        let mut builder = ClassBuilder::new(c"Tat2Panel", class!(NSPanel))
+            .expect("register Tat2Panel NSPanel subclass");
+        // SAFETY: signature matches `-[NSWindow canBecomeKeyWindow]` → BOOL.
+        unsafe {
+            builder.add_method(
+                sel!(canBecomeKeyWindow),
+                can_become_key as extern "C" fn(*const AnyObject, Sel) -> Bool,
+            );
+        }
+        builder.register()
+    }
+
+    let Some(_mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Ok(ns_window_ptr) = win.ns_window() else {
+        return;
+    };
+    if ns_window_ptr.is_null() {
+        return;
+    }
+
+    // SAFETY: `ns_window()` hands us an autoreleased pointer to the window's live
+    // `NSWindow`. We swap its class to our panel subclass, then retain it and only
+    // invoke standard AppKit methods on the main thread.
+    unsafe {
+        object_setClass(ns_window_ptr.cast(), panel_class());
+
+        let ns_window: Retained<NSWindow> =
+            Retained::retain(ns_window_ptr.cast()).expect("non-null NSWindow");
+
+        let mask = ns_window.styleMask() | NSWindowStyleMask::NonactivatingPanel;
+        ns_window.setStyleMask(mask);
+
+        let behavior = ns_window.collectionBehavior()
+            | NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary;
+        ns_window.setCollectionBehavior(behavior);
+
+        ns_window.setLevel(FLOATING_LEVEL);
     }
 }
 
@@ -354,10 +446,18 @@ pub fn run() {
             if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
                 // Let the popover appear over other apps' full-screen Spaces
                 // (macOS), like a real menu-bar utility. A plain always-on-top
-                // window can't draw over a full-screen app; this sets the
-                // NSWindow collection behavior (canJoinAllSpaces |
-                // fullScreenAuxiliary) so the summoned pad floats above it.
+                // window can't draw over a full-screen app — even with
+                // `CanJoinAllSpaces | FullScreenAuxiliary` and a high window level
+                // (verified on device, issue #70). The fix is to make it a
+                // *non-activating NSPanel*; `promote_to_panel_macos` does the class
+                // swap plus the style/behavior/level setup.
+                //
+                // We still call tao's `set_visible_on_all_workspaces(true)` first
+                // (it sets the CanJoinAllSpaces bit); the helper then converts the
+                // window to a panel and ORs in the rest.
                 let _ = win.set_visible_on_all_workspaces(true);
+                #[cfg(target_os = "macos")]
+                promote_to_panel_macos(&win);
 
                 let w = win.clone();
                 win.on_window_event(move |event| match event {
