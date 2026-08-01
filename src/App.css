@@ -828,6 +828,37 @@ body,
   border-color: rgba(192, 57, 43, 0.4);
 }
 
+/* ---- Pads Overview (#68) ---- */
+/* The active pad's row gets a subtle tint distinct from keyboard-highlight. */
+.pads-row.current .hit-label {
+  font-weight: 700;
+}
+/* Archived rows read as quieter: dimmed, with a hollow color ring dot (drawn
+ * inline via border + transparent bg) echoing the strip's inactive-dot look. */
+.pads-row.archived {
+  opacity: 0.6;
+}
+.pads-row.archived:hover,
+.pads-row.archived.active {
+  opacity: 1;
+}
+/* Trailing per-row action ("Archive" / "Unarchive") reusing the trash button
+ * chrome but as an inline span so it lives inside the row <button>. */
+.pads-action {
+  flex: none;
+  border: 0.5px solid rgba(128, 128, 128, 0.35);
+  background: var(--bg);
+  color: var(--ink);
+  border-radius: 7px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pads-action.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ---- Animated accent glow on overlay cards ----
  * The one moving flourish in the app, and only on the modal moments where you
  * aren't typing: a slow glint of the active pad's color travels the card edge.

@@ -18,6 +18,7 @@ import { FindBar } from "./components/FindBar";
 import { SearchOverlay } from "./components/SearchOverlay";
 import { RevisionBrowser } from "./components/RevisionBrowser";
 import { TrashView } from "./components/TrashView";
+import { PadsOverview } from "./components/PadsOverview";
 import { MarkdownView } from "./components/MarkdownView";
 import {
   exportPad,
@@ -34,7 +35,13 @@ import "./App.css";
 const BEFORE_QUIT_EVENT = "tat2://before-quit";
 
 /** The mutually-exclusive full-screen overlays. */
-type Overlay = "none" | "settings" | "search" | "history" | "trash";
+type Overlay =
+  | "none"
+  | "settings"
+  | "search"
+  | "history"
+  | "trash"
+  | "overview";
 
 function prefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
@@ -238,6 +245,10 @@ export default function App() {
       } else if (e.code === "KeyN") {
         e.preventDefault();
         w.addPad();
+      } else if (e.code === "KeyO") {
+        e.preventDefault();
+        setShowFind(false);
+        setModal("overview");
       } else if (e.code === "BracketLeft") {
         e.preventDefault();
         w.switchByOffset(-1);
@@ -349,11 +360,15 @@ export default function App() {
   }
 
   const fontSize = ws.index.settings.fontSize ?? 15;
+  // The strip shows only non-archived pads (#68); archived pads live in the
+  // Pads Overview overlay. Test with truthiness — Rust omits `archived` when
+  // false — never `=== false`.
+  const visiblePads = ws.index.pads.filter((p) => !p.archived);
 
   return (
     <div className="app" data-color={ws.activePad?.color ?? "amber"}>
       <TopBar
-        pads={ws.index.pads}
+        pads={visiblePads}
         contents={ws.contents}
         activeId={ws.activeId}
         pinned={pinned}
@@ -362,6 +377,10 @@ export default function App() {
         onRename={ws.renamePad}
         onReorder={ws.reorderPads}
         onTogglePin={togglePin}
+        onOverview={() => {
+          setShowFind(false);
+          setModal("overview");
+        }}
         onHistory={() => {
           setShowFind(false);
           setModal("history");
@@ -461,6 +480,21 @@ export default function App() {
             await ws.restoreFromTrash(id);
             setModal("none");
           }}
+          onClose={() => setModal("none")}
+        />
+      ) : null}
+
+      {modal === "overview" ? (
+        <PadsOverview
+          pads={ws.index.pads}
+          contents={ws.contents}
+          activeId={ws.activeId}
+          onOpen={(id) => {
+            ws.switchPad(id);
+            setModal("none");
+          }}
+          onArchive={ws.archivePad}
+          onUnarchive={ws.unarchivePad}
           onClose={() => setModal("none")}
         />
       ) : null}

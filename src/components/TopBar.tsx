@@ -13,6 +13,7 @@ interface TopBarProps {
   onRename: (id: string, title: string) => void;
   onReorder: (orderedIds: string[]) => void;
   onTogglePin: () => void;
+  onOverview: () => void;
   onHistory: () => void;
   preview: boolean;
   onTogglePreview: () => void;
@@ -30,6 +31,7 @@ export function TopBar({
   onRename,
   onReorder,
   onTogglePin,
+  onOverview,
   onHistory,
   preview,
   onTogglePreview,
@@ -115,6 +117,13 @@ export function TopBar({
         title={preview ? "Edit text" : "Preview Markdown"}
       >
         {preview ? "✎" : "👁"}
+      </button>
+      <button
+        className="icon-btn overview"
+        onClick={onOverview}
+        title="All sketchpads (⌘O)"
+      >
+        ▦
       </button>
       <button className="icon-btn history" onClick={onHistory} title="History">
         🕘

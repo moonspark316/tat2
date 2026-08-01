@@ -5,6 +5,13 @@ export interface PadMeta {
   order: number;
   createdAt: number;
   updatedAt: number;
+  /**
+   * Whether the pad is archived (OneTab-style): hidden from the strip but still
+   * searchable and unarchivable. Rust omits this key entirely when false, so it
+   * is optional here — always test archived-ness with truthiness (`p.archived`
+   * / `!p.archived`), never `=== false`.
+   */
+  archived?: boolean;
 }
 
 export type ThemeMode = "system" | "light" | "dark";
