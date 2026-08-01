@@ -240,6 +240,35 @@ body,
   opacity: 0.4;
 }
 
+/* ---- Overflow chip (#69) ----
+ * The "+N" quiet count that stands in for the dots that don't fit. It reads as
+ * part of the dot family (same 16px height, ink-toned like the add button) but
+ * carries a small numeral, so it never shouts. Clicking it opens the Pads
+ * Overview (same as ⌘O / the grid button). Kept a real <button> so it stays
+ * clickable inside the header's data-tauri-drag-region. */
+.dot-chip {
+  height: 16px;
+  min-width: 16px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: color-mix(in srgb, var(--ink) 62%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+.dot-chip:hover {
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+  color: var(--ink);
+  transform: scale(1.06);
+}
+
 .icon-btn.pin {
   font-size: 13px;
 }

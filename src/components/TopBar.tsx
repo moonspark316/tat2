@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PadMeta } from "../types";
 import { swatch } from "../palette";
 import { DEFAULT_PAD_TITLE, hasExplicitTitle, padLabel } from "../lib/text";
+import { computeDotFit, selectVisibleDots } from "../lib/dotFit";
 
 interface TopBarProps {
   pads: PadMeta[];
@@ -42,6 +43,28 @@ export function TopBar({
   const [draft, setDraft] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // ---- Measure the `.dots` container so the strip never overflows (#69) ----
+  // Local UI state only: TopBar stays presentational (no persistence). We watch
+  // the container's inner width with a ResizeObserver and recompute the fit on
+  // resize; the pads-list dependency below re-measures on add/remove/archive.
+  const dotsRef = useRef<HTMLDivElement>(null);
+  const [dotsWidth, setDotsWidth] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = dotsRef.current;
+    if (!el) return;
+    // Seed immediately so the first paint isn't a full unbounded strip.
+    setDotsWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box) setDotsWidth(box.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+    // Re-run when the pad count changes so a newly-added/removed pad re-measures
+    // even if the container's own box didn't change size.
+  }, [pads.length]);
 
   useEffect(() => {
     if (renamingId) inputRef.current?.select();
@@ -84,31 +107,72 @@ export function TopBar({
         ×
       </button>
 
-      <div className="dots">
-        {pads.map((p) => {
-          const s = swatch(p.color);
-          const active = p.id === activeId;
-          return (
-            <button
-              key={p.id}
-              className={`dot ${active ? "active" : ""} ${
-                dragId === p.id ? "dragging" : ""
-              }`}
-              style={{ ["--this" as string]: s.dot }}
-              title={padLabel(p.title, contents[p.id] ?? "")}
-              draggable
-              onDragStart={() => setDragId(p.id)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => handleDrop(p.id)}
-              onDragEnd={() => setDragId(null)}
-              onClick={() => onSwitch(p.id)}
-              onDoubleClick={() => startRename(p)}
-            />
+      <div className="dots" ref={dotsRef}>
+        {(() => {
+          // Fit as many dots as the measured width allows, then a "+N" chip
+          // (#69). Before the first measurement (width 0) render the full strip
+          // so we never flash an empty strip; the layout effect corrects it on
+          // the next frame.
+          const visibleCount =
+            dotsWidth > 0
+              ? computeDotFit(pads.length, dotsWidth).visibleCount
+              : pads.length;
+          const orderedIds = pads.map((p) => p.id);
+          const shownIds = new Set(
+            selectVisibleDots(orderedIds, visibleCount, activeId),
           );
-        })}
-        <button className="dot add" onClick={onAdd} title="New sketchpad (⌘N)">
-          +
-        </button>
+          // Preserve strip order for the shown dots (selectVisibleDots may pin
+          // the active pad last, but rendering in pad order keeps drag targets
+          // stable; the pinned active dot still renders because it's in the set).
+          const shownPads = pads.filter((p) => shownIds.has(p.id));
+          // Derive the chip count from what's actually rendered so it's always
+          // exact — even when the narrow-width floor forces the active dot in
+          // (which reduces the overflow by one vs. computeDotFit's raw count).
+          const overflow = pads.length - shownPads.length;
+          const showChip = overflow > 0;
+          return (
+            <>
+              {shownPads.map((p) => {
+                const s = swatch(p.color);
+                const active = p.id === activeId;
+                return (
+                  <button
+                    key={p.id}
+                    className={`dot ${active ? "active" : ""} ${
+                      dragId === p.id ? "dragging" : ""
+                    }`}
+                    style={{ ["--this" as string]: s.dot }}
+                    title={padLabel(p.title, contents[p.id] ?? "")}
+                    draggable
+                    onDragStart={() => setDragId(p.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => handleDrop(p.id)}
+                    onDragEnd={() => setDragId(null)}
+                    onClick={() => onSwitch(p.id)}
+                    onDoubleClick={() => startRename(p)}
+                  />
+                );
+              })}
+              {showChip ? (
+                <button
+                  className="dot-chip"
+                  onClick={onOverview}
+                  title={`${overflow} more sketchpads (⌘O)`}
+                  aria-label={`${overflow} more sketchpads. Open all sketchpads (⌘O)`}
+                >
+                  +{overflow}
+                </button>
+              ) : null}
+              <button
+                className="dot add"
+                onClick={onAdd}
+                title="New sketchpad (⌘N)"
+              >
+                +
+              </button>
+            </>
+          );
+        })()}
       </div>
 
       <button
